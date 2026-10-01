@@ -1,0 +1,11 @@
+[Unit]
+Description=Screensaver ASCII no Konsole quando o PC fica ocioso
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/swayidle -w timeout 150 %h/.local/bin/screensaver-iniciar resume %h/.local/bin/screensaver-parar
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target

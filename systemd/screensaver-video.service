@@ -1,0 +1,10 @@
+[Unit]
+Description=Gera o vídeo do screensaver pra tela de bloqueio
+
+[Service]
+Type=oneshot
+TimeoutStartSec=3h
+Nice=19
+IOSchedulingClass=idle
+CPUSchedulingPolicy=idle
+ExecStart=%h/.local/bin/screensaver-ascii --video %h/.local/share/screensaver-ascii/bloqueio.mp4 --minutos 25

@@ -1,0 +1,5 @@
+#!/bin/bash
+# Chamado pelo swayidle quando mexe no mouse/teclado.
+PIDF="${XDG_RUNTIME_DIR:-/tmp}/screensaver.pid"
+[ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null
+rm -f "$PIDF"

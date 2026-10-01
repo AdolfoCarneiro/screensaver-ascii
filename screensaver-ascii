@@ -1,0 +1,4043 @@
+#!/usr/bin/env python3
+"""Screensaver ASCII: várias animações que se dissolvem umas nas outras.
+
+Roda dentro do Konsole em tela cheia. Sai com qualquer tecla (ou quando a
+tela é bloqueada). `screensaver-ascii --bench` mede o custo de cada cena e
+`screensaver-ascii --cena Nome` fixa uma cena só (pra testar).
+"""
+import colorsys
+import json
+import math
+import os
+import random
+import select
+import subprocess
+import sys
+import termios
+import time
+import tty
+
+FPS = 30
+DURACAO = (18, 32)   # segundos em cada cena (sorteado)
+TRANSICAO = 4.0      # segundos de dissolve entre cenas
+CHANCE_COMBO = 0.35  # chance de a próxima cena ser duas combinadas
+ASPECTO = 2.0        # célula do terminal é ~2x mais alta que larga
+
+RAMPA = " .:-=+*#%@"
+GLITCH = "01#%&@$*<>/\\|=+"
+NIVEIS = 32
+OVOS = bool(os.environ.get("SS_OVOS"))  # modo demo: todos os easter eggs sempre
+BG = 1 << 48         # cor com fundo: fg | (bg << 24) | BG
+
+
+# ---------------------------------------------------------------- cores
+
+def rgb(r, g, b):
+    r = 0 if r < 0 else 255 if r > 255 else int(r)
+    g = 0 if g < 0 else 255 if g > 255 else int(g)
+    b = 0 if b < 0 else 255 if b > 255 else int(b)
+    return (r << 16) | (g << 8) | b
+
+
+def clamp(v):
+    return 0.0 if v < 0 else 1.0 if v > 1 else v
+
+
+def escala(c, f):
+    return rgb(((c >> 16) & 255) * f, ((c >> 8) & 255) * f, (c & 255) * f)
+
+
+def misturar(a, b, t):
+    t = clamp(t)
+    return rgb(((a >> 16) & 255) * (1 - t) + ((b >> 16) & 255) * t,
+               ((a >> 8) & 255) * (1 - t) + ((b >> 8) & 255) * t,
+               (a & 255) * (1 - t) + (b & 255) * t)
+
+
+def hsv(h, s=1.0, v=1.0):
+    r, g, b = colorsys.hsv_to_rgb(h % 1.0, clamp(s), clamp(v))
+    return rgb(r * 255, g * 255, b * 255)
+
+
+def fundo(fg, bg):
+    return fg | (bg << 24) | BG
+
+
+def apagar(k):
+    """Metade do brilho (usada pra cena de baixo nos combos)."""
+    if k & BG:
+        return ((k & 0xFFFFFF) >> 1 & 0x7F7F7F) | ((((k >> 24) & 0xFFFFFF) >> 1 & 0x7F7F7F) << 24) | BG
+    return (k >> 1) & 0x7F7F7F
+
+
+def lut(fn):
+    out = []
+    for i in range(NIVEIS):
+        r, g, b = fn(i / (NIVEIS - 1))
+        out.append(rgb(r, g, b))
+    return out
+
+
+def lut_hsv(fn):
+    def cor_(v):
+        h, s, b = fn(v)
+        r, g, bb = colorsys.hsv_to_rgb(h % 1.0, clamp(s), clamp(b))
+        return r * 255, g * 255, bb * 255
+    return lut(cor_)
+
+
+PALETAS = {
+    "verde": lut(lambda v: (v ** 3 * 190, 25 + 230 * v, v ** 3 * 120)),
+    "ciano": lut(lambda v: (v ** 3 * 170, 30 + 200 * v, 45 + 210 * v)),
+    "ambar": lut(lambda v: (40 + 215 * v, 20 + 170 * v ** 1.3, v ** 3 * 90)),
+    "roxo": lut(lambda v: (45 + 190 * v, v ** 2 * 130, 70 + 185 * v)),
+    "fogo": lut(lambda v: (40 + 215 * clamp(v * 2.2), 255 * clamp(v * 2 - 0.55), 255 * clamp(v * 3 - 2))),
+    "aurora": lut_hsv(lambda v: (0.36 + 0.42 * v, 0.85 - 0.35 * v ** 4, 0.12 + 0.88 * v)),
+    "neon": lut_hsv(lambda v: (0.86 - 0.36 * v, 0.9 - 0.4 * v ** 4, 0.15 + 0.85 * v)),
+    "poente": lut_hsv(lambda v: (0.78 + 0.36 * v, 0.9 - 0.3 * v ** 3, 0.15 + 0.85 * v)),
+}
+PALETAS_SORTEIO = ["verde", "verde", "ciano", "ambar", "roxo", "aurora", "neon", "poente"]
+
+
+def cor(pal, v):
+    return pal[int(clamp(v) * (NIVEIS - 1))]
+
+
+def char_rampa(v):
+    return RAMPA[int(clamp(v) * (len(RAMPA) - 1))]
+
+
+# ------------------------------------------------------ texto e pixels
+
+def escrever(ch, co, w, h, x, y, txt, c, opaco=False):
+    if 0 <= y < h:
+        base = y * w
+        for k, s in enumerate(txt):
+            xx = x + k
+            if 0 <= xx < w and (opaco or s != " "):
+                ch[base + xx] = s
+                co[base + xx] = c
+
+
+def quebrar(txt, largura):
+    linhas, atual = [], ""
+    for p in txt.split():
+        if atual and len(atual) + 1 + len(p) > largura:
+            linhas.append(atual)
+            atual = p
+        else:
+            atual = atual + " " + p if atual else p
+    if atual:
+        linhas.append(atual)
+    return linhas or [""]
+
+
+def justificar(txt, largura):
+    linhas, atual = [], []
+    for p in txt.split():
+        if atual and len(" ".join(atual + [p])) > largura:
+            linhas.append(atual)
+            atual = [p]
+        else:
+            atual.append(p)
+    out = []
+    for l in linhas:
+        if len(l) == 1:
+            out.append(l[0])
+            continue
+        falta = largura - sum(len(p) for p in l)
+        vaos = len(l) - 1
+        s = ""
+        for k, p in enumerate(l[:-1]):
+            s += p + " " * (falta // vaos + (1 if k < falta % vaos else 0))
+        out.append(s + l[-1])
+    if atual:
+        out.append(" ".join(atual))
+    return out
+
+
+def pixels_para_celulas(px, w, h, ch, co):
+    """Converte um buffer de pixels (w x 2h, cor 0 = vazio) em meios-blocos."""
+    for y in range(h):
+        a0 = 2 * y * w
+        b0 = a0 + w
+        c0 = y * w
+        for x in range(w):
+            a = px[a0 + x]
+            b = px[b0 + x]
+            i = c0 + x
+            if a == b:
+                if a:
+                    ch[i] = "█"
+                    co[i] = a
+                else:
+                    ch[i] = " "
+            elif not b:
+                ch[i] = "▀"
+                co[i] = a
+            elif not a:
+                ch[i] = "▄"
+                co[i] = b
+            else:
+                ch[i] = "▀"
+                co[i] = a | (b << 24) | BG
+
+
+FONTE = {
+    "A": (".###.", "#...#", "#####", "#...#", "#...#"), "B": ("####.", "#...#", "####.", "#...#", "####."),
+    "C": (".####", "#....", "#....", "#....", ".####"), "D": ("####.", "#...#", "#...#", "#...#", "####."),
+    "E": ("#####", "#....", "####.", "#....", "#####"), "F": ("#####", "#....", "####.", "#....", "#...."),
+    "G": (".####", "#....", "#..##", "#...#", ".###."), "H": ("#...#", "#...#", "#####", "#...#", "#...#"),
+    "I": ("#####", "..#..", "..#..", "..#..", "#####"), "J": ("..###", "...#.", "...#.", "#..#.", ".##.."),
+    "K": ("#...#", "#..#.", "###..", "#..#.", "#...#"), "L": ("#....", "#....", "#....", "#....", "#####"),
+    "M": ("#...#", "##.##", "#.#.#", "#...#", "#...#"), "N": ("#...#", "##..#", "#.#.#", "#..##", "#...#"),
+    "O": (".###.", "#...#", "#...#", "#...#", ".###."), "P": ("####.", "#...#", "####.", "#....", "#...."),
+    "Q": (".###.", "#...#", "#.#.#", "#..#.", ".##.#"), "R": ("####.", "#...#", "####.", "#..#.", "#...#"),
+    "S": (".####", "#....", ".###.", "....#", "####."), "T": ("#####", "..#..", "..#..", "..#..", "..#.."),
+    "U": ("#...#", "#...#", "#...#", "#...#", ".###."), "V": ("#...#", "#...#", "#...#", ".#.#.", "..#.."),
+    "W": ("#...#", "#...#", "#.#.#", "##.##", "#...#"), "X": ("#...#", ".#.#.", "..#..", ".#.#.", "#...#"),
+    "Y": ("#...#", ".#.#.", "..#..", "..#..", "..#.."), "Z": ("#####", "...#.", "..#..", ".#...", "#####"),
+    "0": (".###.", "#..##", "#.#.#", "##..#", ".###."), "1": ("..#..", ".##..", "..#..", "..#..", ".###."),
+    "2": ("####.", "....#", ".###.", "#....", "#####"), "3": ("####.", "....#", ".###.", "....#", "####."),
+    "4": ("#...#", "#...#", "#####", "....#", "....#"), "5": ("#####", "#....", "####.", "....#", "####."),
+    "6": (".###.", "#....", "####.", "#...#", ".###."), "7": ("#####", "....#", "...#.", "..#..", "..#.."),
+    "8": (".###.", "#...#", ".###.", "#...#", ".###."), "9": (".###.", "#...#", ".####", "....#", ".###."),
+    "!": ("..#..", "..#..", "..#..", ".....", "..#.."), ".": (".....", ".....", ".....", ".....", "..#.."),
+    " ": (".....", ".....", ".....", ".....", "....."),
+}
+
+
+def texto_grade(txt, esc=1):
+    """Texto na fonte 5x5, como grade de pixels (listas de bool)."""
+    linhas = [[] for _ in range(5)]
+    for k, c in enumerate(txt.upper()):
+        g = FONTE.get(c, FONTE[" "])
+        for r in range(5):
+            if k:
+                linhas[r].append(False)
+            linhas[r].extend(p == "#" for p in g[r])
+    out = []
+    for r in linhas:
+        linha = [p for p in r for _ in range(esc)]
+        out.extend([linha] * esc)
+    return out
+
+
+def meio_blocos(grade):
+    linhas = []
+    for y in range(0, len(grade), 2):
+        a = grade[y]
+        b = grade[y + 1] if y + 1 < len(grade) else [False] * len(a)
+        linhas.append("".join("█" if p and q else "▀" if p else "▄" if q else " " for p, q in zip(a, b)))
+    return linhas
+
+
+def carregar_arte(txt):
+    linhas = [l.replace(" ", "") for l in txt.strip("\n").split("\n")]
+    w = max(len(l) for l in linhas)
+    return [l.ljust(w, ".") for l in linhas]
+
+
+def suave(p):
+    p = clamp(p)
+    return p * p * (3 - 2 * p)
+
+
+# ---------------------------------------------------------------- cenas
+
+class Cena:
+    paleta_fixa = None
+    paletas = None
+    combinavel = True
+    duracao = DURACAO
+    peso = 1.0
+
+    def __init__(self, paleta):
+        nome = self.paleta_fixa or (random.choice(self.paletas) if self.paletas else paleta)
+        self.pal = PALETAS[nome]
+
+    def resize(self, w, h):
+        self.w, self.h, self.n = w, h, w * h
+        self.vazio = [" "] * self.n
+        self.cx, self.cy = w / 2, h / 2
+        self.iniciar()
+
+    def iniciar(self):
+        pass
+
+    def esperar(self, s):
+        fim = self.t + s
+        while self.t < fim:
+            yield
+
+
+class Matrix(Cena):
+    """Chuva digital: colunas crescem de cima pra baixo e somem pela cauda."""
+    paleta_fixa = "verde"
+    CH = list("2598Z*):.\"=+-¦|_") + list("ｦｱｳｴｵｶｷｹｺｻｼｽｾｿﾀﾂﾃﾅﾆﾇﾈﾊﾋﾎﾏﾐﾑﾒﾓﾔﾕﾗﾘﾜ")
+    PONTA = 0xDBFFDB
+    TONS = [(int(0x92 + (0x18 - 0x92) * k / 7) << 16) | (int(0xBE + (0x53 - 0xBE) * k / 7) << 8)
+            | int(0x92 + (0x18 - 0x92) * k / 7) for k in range(8)]
+    ESCUROS = [((int((c >> 16) * 0.65)) << 16) | (int(((c >> 8) & 255) * 0.65) << 8) | int((c & 255) * 0.65)
+               for c in TONS[-3:]]
+
+    def iniciar(self):
+        self.revela = (random.uniform(3, 5) if OVOS else random.uniform(6, 15)) if OVOS or random.random() < 0.35 else None
+        self.forma = []
+        if self.revela:
+            alt = self.h * 0.86
+            y0 = (self.h - alt) / 2
+            larg = 76 * alt / 92 * ASPECTO
+            x0 = (self.w - larg) / 2
+            for y in range(self.h):
+                for x in range(self.w):
+                    if rola_regiao((x + 0.5 - x0) / larg * 76, (y + 0.5 - y0) / alt * 92):
+                        self.forma.append(y * self.w + x)
+        self.sym = [" "] * self.n
+        self.cor = [0] * self.n
+        self.colunas = []
+        self.ocupadas = set()
+        self.acc = 0.0
+        for _ in range(int(self.w * 0.5)):
+            c = self.nova_coluna()
+            if c:
+                passos = random.randrange(self.h + c["tam"])
+                for _ in range(passos):
+                    self.passo(c)
+
+    def nova_coluna(self):
+        livres = [x for x in range(self.w) if x not in self.ocupadas]
+        if not livres:
+            return None
+        x = random.choice(livres)
+        self.ocupadas.add(x)
+        c = {"x": x, "cabeca": 0, "topo": 0, "tam": random.randint(max(1, self.h // 10), self.h),
+             "vel": random.uniform(5, 28), "acc": 0.0, "segura": 0}
+        if c["tam"] == self.h:
+            c["segura"] = random.randint(20, 45)
+        self.colunas.append(c)
+        return c
+
+    def apagar_topo(self, c):
+        w = self.w
+        self.sym[c["topo"] * w + c["x"]] = " "
+        c["topo"] += 1
+        if c["cabeca"] - c["topo"] > 1:
+            self.cor[c["topo"] * w + c["x"]] = random.choice(self.ESCUROS)
+
+    def passo(self, c):
+        w, h, x = self.w, self.h, c["x"]
+        if c["cabeca"] < h:
+            i = c["cabeca"] * w + x
+            self.sym[i] = random.choice(self.CH)
+            self.cor[i] = self.PONTA
+            if c["cabeca"] > c["topo"]:
+                self.cor[i - w] = random.choice(self.TONS)
+            c["cabeca"] += 1
+        elif c["topo"] < c["cabeca"]:
+            ult = (c["cabeca"] - 1) * w + x
+            if self.cor[ult] == self.PONTA:
+                self.cor[ult] = random.choice(self.TONS)
+            if c["segura"]:
+                c["segura"] -= 1
+            else:
+                self.apagar_topo(c)
+        if c["cabeca"] - c["topo"] > c["tam"]:
+            self.apagar_topo(c)
+        return c["topo"] >= h or (c["topo"] >= c["cabeca"] and c["cabeca"] >= h)
+
+    def draw(self, t, dt, ch, co):
+        self.acc += dt * random.uniform(14, 26)
+        while self.acc >= 1:
+            self.acc -= 1
+            self.nova_coluna()
+        vivas = []
+        for c in self.colunas:
+            c["acc"] += dt * c["vel"]
+            acabou = False
+            while c["acc"] >= 1 and not acabou:
+                c["acc"] -= 1
+                acabou = self.passo(c)
+            if acabou:
+                self.ocupadas.discard(c["x"])
+            else:
+                vivas.append(c)
+        self.colunas = vivas
+        sym, cor_ = self.sym, self.cor
+        for _ in range(max(1, self.n // 400)):
+            i = random.randrange(self.n)
+            if sym[i] != " ":
+                sym[i] = random.choice(self.CH)
+                if random.random() < 0.2 and cor_[i] != self.PONTA:
+                    cor_[i] = random.choice(self.TONS)
+        ch[:] = sym
+        co[:] = cor_
+        if self.revela and self.revela <= t <= self.revela + 5:
+            k = clamp(min((t - self.revela) / 1.2, (self.revela + 5 - t) / 1.2))
+            for i in self.forma:
+                if ch[i] == " ":
+                    if random.random() < k:
+                        ch[i], co[i] = random.choice(self.CH), misturar(0x0A2A0A, 0xD8FFD8, k)
+                else:
+                    co[i] = misturar(co[i], 0xFFFFFF, 0.85 * k)
+
+
+class Plasma(Cena):
+    """Ondas de plasma se misturando."""
+
+    def iniciar(self):
+        self.dist = [math.hypot(x - self.cx, (y - self.cy) * ASPECTO) for y in range(self.h) for x in range(self.w)]
+        self.k = random.uniform(0.06, 0.12)
+
+    def draw(self, t, dt, ch, co):
+        w, h, k, pal, dist = self.w, self.h, self.k, self.pal, self.dist
+        sx = [math.sin(x * k + t) for x in range(w)]
+        sy = [math.sin(y * k * 2.2 - t * 0.7) for y in range(h)]
+        sin = math.sin
+        for y in range(h):
+            base = y * w
+            syy = sy[y]
+            for x in range(w):
+                i = base + x
+                v = sx[x] + syy + sin((x + y * 2) * k * 0.6 + t * 1.3) + sin(dist[i] * k * 1.4 - t)
+                v = (v + 4) / 8
+                v = v * v * 1.25
+                if v < 0.18:
+                    ch[i] = " "
+                else:
+                    ch[i] = RAMPA[min(9, int(v * 9.99))]
+                    co[i] = pal[min(NIVEIS - 1, int(v * (NIVEIS - 1)))]
+
+
+class Tunel(Cena):
+    """Túnel xadrez girando, voando pra dentro, com anéis coloridos."""
+
+    def iniciar(self):
+        raio = min(self.w, self.h * ASPECTO) / 2
+        self.prof, self.ang, self.sombra = [], [], []
+        for y in range(self.h):
+            for x in range(self.w):
+                dx, dy = (x - self.cx) / raio, (y - self.cy) * ASPECTO / raio
+                r = math.hypot(dx, dy) + 1e-3
+                self.prof.append(0.5 / r)
+                self.ang.append(math.atan2(dy, dx) / (2 * math.pi) + 0.5)
+                self.sombra.append(clamp(r * 1.3))
+        self.giro = random.choice((-1, 1)) * random.uniform(0.2, 0.6)
+        self.modo = random.choice(("arco", "arco", "duo", "mono"))
+        if self.modo == "arco":
+            self.tab = [[hsv(k / 48, 0.8, 0.1 + 0.9 * b / 15) for b in range(16)] for k in range(48)]
+            self.kmul = 3
+        elif self.modo == "duo":
+            h1 = random.random()
+            h2 = (h1 + random.uniform(0.3, 0.5)) % 1
+            self.tab = [[hsv(h1 if k < 24 else h2, 0.85, 0.1 + 0.9 * b / 15) for b in range(16)] for k in range(48)]
+            self.kmul = 24
+        else:
+            linha = [self.pal[int(b / 15 * (NIVEIS - 1))] for b in range(16)]
+            self.tab = [linha] * 48
+            self.kmul = 0
+
+    def draw(self, t, dt, ch, co):
+        prof, ang, sombra, tab, kmul = self.prof, self.ang, self.sombra, self.tab, self.kmul
+        av, gv = t * 3.0, t * self.giro + math.sin(t * 0.4) * 0.3
+        desloc = int(t * 6) if kmul == 3 else 0
+        for i in range(self.n):
+            s = sombra[i]
+            if s < 0.06:
+                ch[i] = " "
+                continue
+            u = int(prof[i] * 6 + av)
+            v = int(ang[i] * 16 + gv + prof[i] * 1.5)
+            linha = tab[(u * kmul + desloc) % 48]
+            if (u + v) & 1:
+                ch[i] = "#" if s > 0.5 else "+"
+                co[i] = linha[int(s * 15)]
+            else:
+                ch[i] = "." if s > 0.3 else " "
+                co[i] = linha[int(s * 5)]
+
+
+class Estrelas(Cena):
+    """Viagem na velocidade da luz, com estrelas de várias cores."""
+    CORES = [0x9BB0FF, 0xAABFFF, 0xCAD7FF, 0xF8F7FF, 0xFFF4EA, 0xFFD2A1, 0xFFB56C, 0xFF8F6B, 0x9DFFE0, 0xF0A8FF]
+
+    def iniciar(self):
+        self.cores = self.CORES if random.random() < 0.75 else [self.pal[NIVEIS - 1], self.pal[20]]
+        self.estrelas = [self.nova(random.uniform(0.05, 1)) for _ in range(int(self.n * 0.04))]
+        self.vel = random.uniform(0.25, 0.5)
+
+    def nova(self, z=1.0):
+        return [random.uniform(-1, 1), random.uniform(-1, 1), z, random.choice(self.cores)]
+
+    def draw(self, t, dt, ch, co):
+        ch[:] = self.vazio
+        w, h = self.w, self.h
+        vel = self.vel * (1 + 0.6 * math.sin(t * 0.3))
+        for s in self.estrelas:
+            pz = s[2]
+            s[2] -= vel * dt
+            if s[2] <= 0.02:
+                s[:] = self.nova()
+                continue
+            c = s[3]
+            for z, trilha in ((pz, True), (s[2], False)):
+                x = int(self.cx + s[0] / z * w * 0.25)
+                y = int(self.cy + s[1] / z * h * 0.25)
+                if not (0 <= x < w and 0 <= y < h):
+                    if not trilha:
+                        s[:] = self.nova()
+                    continue
+                i = y * w + x
+                v = 1 - z
+                if trilha:
+                    if ch[i] == " ":
+                        ch[i], co[i] = ".", escala(c, 0.2 + 0.4 * v)
+                else:
+                    ch[i] = "." if z > 0.7 else "+" if z > 0.4 else "*" if z > 0.2 else "@"
+                    co[i] = misturar(c, 0xFFFFFF, 0.6) if z < 0.12 else escala(c, 0.35 + 0.65 * v)
+
+
+class Fogo(Cena):
+    """Fogo subindo do chão."""
+
+    def __init__(self, paleta):
+        super().__init__("fogo" if random.random() < 0.6 else "verde")
+
+    def iniciar(self):
+        self.calor = [0.0] * (self.w * (self.h + 2))
+        self.decai = 0.35 ** (1 / self.h)
+
+    def draw(self, t, dt, ch, co):
+        w, h, c, pal, decai = self.w, self.h, self.calor, self.pal, self.decai
+        fundo_ = (h + 1) * w
+        for x in range(w):
+            c[fundo_ + x] = random.random() ** 0.4 if random.random() < 0.85 else 0.0
+            c[h * w + x] = (c[fundo_ + x] + c[h * w + x]) * 0.5
+        for y in range(h):
+            base, abaixo = y * w, (y + 1) * w
+            for x in range(w):
+                e = c[abaixo + x - 1] if x else 0.0
+                d = c[abaixo + x + 1] if x < w - 1 else 0.0
+                v = (e + c[abaixo + x] * 2 + d) * 0.25 * decai
+                if random.random() < 0.08:
+                    v *= 0.85
+                c[base + x] = v
+                i = base + x
+                if v < 0.08:
+                    ch[i] = " "
+                else:
+                    ch[i] = RAMPA[min(9, int(v * 11))]
+                    co[i] = pal[min(NIVEIS - 1, int(v * 1.3 * (NIVEIS - 1)))]
+
+
+class Ondas(Cena):
+    """Gotas caindo num lago escuro."""
+
+    def iniciar(self):
+        self.gotas = []
+        self.prox = 0.0
+
+    def draw(self, t, dt, ch, co):
+        if t >= self.prox and len(self.gotas) < 4:
+            self.gotas.append((random.uniform(0, self.w), random.uniform(0, self.h), t))
+            self.prox = t + random.uniform(0.6, 1.6)
+        self.gotas = [g for g in self.gotas if t - g[2] < 6]
+        ondas = [(gx, gy, t - gt, (t - gt) * 14, math.exp(-(t - gt) * 0.55)) for gx, gy, gt in self.gotas]
+        w, pal, sin = self.w, self.pal, math.sin
+        for y in range(self.h):
+            base = y * w
+            for x in range(w):
+                s = 0.0
+                for gx, gy, idade, frente, env in ondas:
+                    d = math.hypot(x - gx, (y - gy) * ASPECTO)
+                    if d < frente and d > frente - 40:
+                        s += sin(d * 0.55 - idade * 7.7) * env * (1 - (frente - d) / 40)
+                i = base + x
+                v = abs(s)
+                if v < 0.1:
+                    ch[i] = " "
+                else:
+                    ch[i] = char_rampa(v)
+                    co[i] = cor(pal, v)
+
+
+class Vida(Cena):
+    """Jogo da Vida de Conway (as células mais velhas mudam de cor)."""
+
+    def iniciar(self):
+        self.vivo = [random.random() < 0.25 for _ in range(self.n)]
+        self.idade = [0] * self.n
+        self.brilho = [0.0] * self.n
+        self.acc = 0.0
+
+    def passo(self):
+        w, h, v, idade = self.w, self.h, self.vivo, self.idade
+        novo = [False] * self.n
+        nova_idade = [0] * self.n
+        pop = 0
+        for y in range(h):
+            ya, yb = ((y - 1) % h) * w, ((y + 1) % h) * w
+            yc = y * w
+            for x in range(w):
+                xa, xb = (x - 1) % w, (x + 1) % w
+                k = (v[ya + xa] + v[ya + x] + v[ya + xb] + v[yc + xa] + v[yc + xb]
+                     + v[yb + xa] + v[yb + x] + v[yb + xb])
+                i = yc + x
+                if k == 3 or (k == 2 and v[i]):
+                    novo[i] = True
+                    nova_idade[i] = idade[i] + 1 if v[i] else 0
+                    pop += 1
+        self.vivo, self.idade = novo, nova_idade
+        if pop < self.n * 0.04 or random.random() < 0.02:
+            cx, cy = random.randrange(w), random.randrange(h)
+            for _ in range(self.n // 30):
+                x = (cx + int(random.gauss(0, w / 8))) % w
+                y = (cy + int(random.gauss(0, h / 8))) % h
+                self.vivo[y * w + x] = True
+                self.idade[y * w + x] = 0
+
+    def draw(self, t, dt, ch, co):
+        self.acc += dt
+        if self.acc >= 0.1:
+            self.acc = 0.0
+            self.passo()
+        vivo, idade, b, pal = self.vivo, self.idade, self.brilho, self.pal
+        dec = math.exp(-dt * 3)
+        for i in range(self.n):
+            if vivo[i]:
+                b[i] = 1.0
+                ch[i], co[i] = "█", pal[max(12, NIVEIS - 1 - idade[i])]
+                continue
+            v = b[i] * dec
+            b[i] = v
+            if v < 0.12:
+                ch[i] = " "
+            else:
+                ch[i] = "▒" if v > 0.5 else "░"
+                co[i] = pal[int(v * 0.7 * (NIVEIS - 1))]
+
+
+class Rosca(Cena):
+    """Rosca 3D girando, com luz."""
+
+    def iniciar(self):
+        self.R1, self.R2, self.K2 = 1.0, 2.0, 5.0
+        self.K1 = self.h * self.K2 * 0.42 / (self.R1 + self.R2)
+        nt, nf = max(24, int(self.h * 0.9)), max(80, int(self.h * 3.2))
+        self.cs_t = [(math.cos(a), math.sin(a)) for a in (i * 2 * math.pi / nt for i in range(nt))]
+        self.cs_f = [(math.cos(a), math.sin(a)) for a in (i * 2 * math.pi / nf for i in range(nf))]
+        self.zbuf = [0.0] * self.n
+
+    def draw(self, t, dt, ch, co):
+        ch[:] = self.vazio
+        zb = self.zbuf
+        zb[:] = [0.0] * self.n
+        w, h, pal, R1, R2, K1, K2 = self.w, self.h, self.pal, self.R1, self.R2, self.K1, self.K2
+        cA, sA, cB, sB = math.cos(t * 0.9), math.sin(t * 0.9), math.cos(t * 0.5), math.sin(t * 0.5)
+        lum = ".,-~:;=!*#$@"
+        for ct, st in self.cs_t:
+            cx_ = R2 + R1 * ct
+            cy_ = R1 * st
+            for cf, sf in self.cs_f:
+                x = cx_ * (cB * cf + sA * sB * sf) - cy_ * cA * sB
+                y = cx_ * (sB * cf - sA * cB * sf) + cy_ * cA * cB
+                z = K2 + cA * cx_ * sf + cy_ * sA
+                oz = 1 / z
+                px = int(self.cx + K1 * ASPECTO * x * oz)
+                py = int(self.cy - K1 * y * oz)
+                if 0 <= px < w and 0 <= py < h:
+                    i = py * w + px
+                    if oz > zb[i]:
+                        L = cf * ct * sB - cA * ct * sf - sA * st + cB * (cA * st - ct * sA * sf)
+                        zb[i] = oz
+                        if L > 0:
+                            v = L / 1.42
+                            ch[i] = lum[min(11, int(v * 11.99))]
+                            co[i] = cor(pal, 0.25 + v * 0.75)
+                        else:
+                            ch[i] = "."
+                            co[i] = pal[5]
+
+
+class Hex(Cena):
+    """Terminal de hacker despejando memória."""
+    paletas = ["verde", "verde", "ambar", "ciano"]
+    MSGS = ["ACCESS GRANTED", "decrypting sector", "handshake ok", "injecting payload",
+            "tracing route", "bypassing firewall", "root@localhost:~#", "compiling kernel",
+            "scanning ports", "uplink established", "SIGNAL LOCKED", "brute forcing hash",
+            "uploading rola.exe", "rola.exe has stopped responding", "mounting /dev/rola"]
+
+    def iniciar(self):
+        self.addr = random.randrange(0x7F000000, 0x7FFFFFFF)
+        self.linhas = [self.linha() for _ in range(self.h)]
+        self.acc = 0.0
+        self.vel = random.uniform(8, 20)
+
+    def linha(self):
+        if random.random() < 0.06:
+            m = "[{}] {} 0x{:08x}".format(random.choice(("OK", "!!", "..", "**")), random.choice(self.MSGS),
+                                           random.getrandbits(32))
+            return (m.ljust(self.w)[: self.w], True)
+        partes = []
+        while sum(len(p) for p in partes) < self.w:
+            self.addr += 16
+            bs = [random.getrandbits(8) for _ in range(8)]
+            txt = "".join(chr(b) if 33 <= b < 127 else "." for b in bs)
+            partes.append("{:08x}  {}  {}    ".format(self.addr & 0xFFFFFFFF, " ".join("%02x" % b for b in bs), txt))
+        return ("".join(partes)[: self.w], False)
+
+    def draw(self, t, dt, ch, co):
+        self.acc += dt * self.vel
+        while self.acc >= 1:
+            self.acc -= 1
+            self.linhas.pop(0)
+            self.linhas.append(self.linha())
+        w, h, pal = self.w, self.h, self.pal
+        for y, (txt, msg) in enumerate(self.linhas):
+            base = y * w
+            idade = (y + 1) / h
+            c = 0xE0FFE0 if msg else pal[int((0.15 + idade * 0.6) * (NIVEIS - 1))]
+            quente = pal[NIVEIS - 1]
+            for x in range(w):
+                i = base + x
+                ch[i] = txt[x]
+                co[i] = quente if (not msg and y == h - 1) else c
+
+
+class Synthwave(Cena):
+    """Pôr do sol synthwave: sol listrado, montanhas e grade neon correndo."""
+    combinavel = False
+    TEMAS = [
+        dict(ceu=(0x07001A, 0x2B0A4F, 0x9C1F6E), sol=(0xFFE66B, 0xFF8C42, 0xFF2E7E), monte=0x1A0636,
+             crista=0x2DE2FF, chao=0x06000F, grade=0xFF2BD6, nevoa=0xB02A80),
+        dict(ceu=(0x00000A, 0x001B36, 0x0B5A8C), sol=(0xC8FFFF, 0x4CC9FF, 0x3B5BFF), monte=0x03132B,
+             crista=0xFF4DF2, chao=0x00040C, grade=0x00F0FF, nevoa=0x1470A8),
+        dict(ceu=(0x000000, 0x001A0A, 0x0B5A2A), sol=(0xF0FFB8, 0x86FF6B, 0x1FBF4A), monte=0x001407,
+             crista=0x86FF6B, chao=0x000500, grade=0x33FF66, nevoa=0x127A3A),
+    ]
+
+    def iniciar(self):
+        T = self.T = random.choices(self.TEMAS, weights=(0.6, 0.25, 0.15))[0]
+        pw, ph = self.pw, self.ph = self.w, self.h * 2
+        hor = self.hor = int(ph * 0.56)
+        c0, c1, c2 = T["ceu"]
+        self.ceu = []
+        for py in range(hor):
+            f = py / max(1, hor - 1)
+            c = misturar(c0, c1, f / 0.6) if f < 0.6 else misturar(c1, c2, (f - 0.6) / 0.4)
+            self.ceu.extend([c] * pw)
+        self.estrelas = []
+        for _ in range(int(pw * hor * 0.012)):
+            py = int(random.random() ** 1.6 * hor * 0.7)
+            self.estrelas.append((py * pw + random.randrange(pw), random.uniform(0.3, 1), random.uniform(0, 6.3)))
+        R = self.R = ph * 0.3
+        scx, scy = pw / 2, hor - R * 0.25
+        s0, s1, s2 = T["sol"]
+        self.sol = []
+        for py in range(max(0, int(scy - R)), hor):
+            for px in range(max(0, int(scx - R)), min(pw, int(scx + R) + 1)):
+                if (px + 0.5 - scx) ** 2 + (py + 0.5 - scy) ** 2 <= R * R:
+                    f = (py - (scy - R)) / (2 * R)
+                    c = misturar(s0, s1, f / 0.5) if f < 0.5 else misturar(s1, s2, (f - 0.5) / 0.5)
+                    self.sol.append((py * pw + px, f, c))
+        self.montes = self.gerar_montes(T)
+        self.K = (ph - hor) * 3.0
+        self.foco = ph - hor
+        self.px = [0] * (pw * ph)
+
+    def gerar_montes(self, T):
+        pw, hor = self.pw, self.hor
+
+        def perfil(amp, passo):
+            pts = [random.random() for _ in range(pw // passo + 3)]
+            alt = []
+            for x in range(pw):
+                k = x / passo
+                i = int(k)
+                fr = k - i
+                vale = 0.25 + 0.75 * clamp(abs(x - pw / 2) / (pw * 0.32))
+                alt.append(int(amp * vale * (0.2 + 0.8 * (pts[i] * (1 - fr) + pts[i + 1] * fr))))
+            return alt
+
+        longe = perfil(self.ph * 0.17, random.randint(8, 12))
+        perto = perfil(self.ph * 0.1, random.randint(5, 8))
+        cor_longe = misturar(T["monte"], T["nevoa"], 0.3)
+        crista_longe = misturar(cor_longe, T["crista"], 0.35)
+        mapa = {}
+        for x in range(pw):
+            for py in range(hor - longe[x], hor):
+                mapa[py * pw + x] = crista_longe if py == hor - longe[x] else cor_longe
+            hp = perto[x]
+            hmin = min(perto[x - 1] if x else hp, perto[x + 1] if x < pw - 1 else hp, hp)
+            for py in range(hor - hp, hor):
+                if py <= hor - hmin:
+                    mapa[py * pw + x] = T["crista"]
+                elif (x + py) % 8 == 0:
+                    mapa[py * pw + x] = escala(T["crista"], 0.18)
+                else:
+                    mapa[py * pw + x] = T["monte"]
+        return list(mapa.items())
+
+    def draw(self, t, dt, ch, co):
+        T, pw, ph, hor, px = self.T, self.pw, self.ph, self.hor, self.px
+        px[: hor * pw] = self.ceu
+        for idx, b, fase in self.estrelas:
+            px[idx] = escala(0xFFFFFF, b * (0.55 + 0.45 * math.sin(t * 2.3 + fase)))
+        diam = self.R * 2
+        for idx, f, c in self.sol:
+            if f > 0.33 and (f * diam * 0.9 - t * 3.0) % 5.0 < (f - 0.33) * 10:
+                continue
+            px[idx] = c
+        for idx, c in self.montes:
+            px[idx] = c
+        px[hor * pw:(hor + 1) * pw] = [misturar(T["grade"], 0xFFFFFF, 0.35)] * pw
+        rolar = t * 2.2
+        K, foco, cxp = self.K, self.foco, pw / 2
+        grade, nevoa, chao = T["grade"], T["nevoa"], T["chao"]
+        brilho = misturar(nevoa, 0xFFFFFF, 0.15)
+        for py in range(hor + 1, ph):
+            dy = py - hor
+            z = K / dy
+            neb = clamp((z - 4) / 45)
+            cl = misturar(grade, nevoa, neb)
+            cb = misturar(chao, nevoa, neb * 0.35)
+            b = py * pw
+            z0, z1 = K / (dy - 0.5), K / (dy + 0.5)
+            spp = foco / z
+            if z0 - z1 >= 1 or spp < 1.6:
+                # longe demais pra ver linha por linha: só a névoa brilhando no horizonte
+                c = misturar(misturar(cb, cl, 0.3), brilho, math.exp(-dy / 3.0))
+                px[b:b + pw] = [c] * pw
+                continue
+            if int(z0 + rolar) != int(z1 + rolar):
+                px[b:b + pw] = [misturar(cb, cl, 1.4 - (z0 - z1) * 1.2)] * pw
+                continue
+            px[b:b + pw] = [cb] * pw
+            n = int(cxp / spp) + 1
+            for k in range(-n, n + 1):
+                X = int(cxp + k * spp)
+                if 0 <= X < pw:
+                    px[b + X] = cl
+        pixels_para_celulas(px, self.w, self.h, ch, co)
+
+
+# ------------------------------------------------ Pokémon (sprites de FireRed/LeafGreen, cache local)
+
+POKEDEX_ARQ = os.path.expanduser("~/.local/share/screensaver-ascii/pokemon.json")
+_POKEDEX = None
+ALFA36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def pokedex():
+    """Sprites e tipos dos 151 (gerado por ~/.local/share/screensaver-ascii/baixar-pokemon.py)."""
+    global _POKEDEX
+    if _POKEDEX is None:
+        try:
+            with open(POKEDEX_ARQ) as f:
+                _POKEDEX = {int(k): v for k, v in json.load(f).items()}
+        except Exception:
+            _POKEDEX = {}
+    return _POKEDEX
+
+
+def grade_sprite(s):
+    pal = [c or 0x010101 for c in s["pal"]]
+    idx = {ch: pal[i] for i, ch in enumerate(ALFA36[:len(pal)])}
+    idx["."] = 0
+    return [[idx[ch] for ch in linha] for linha in s["px"]]
+
+
+# Fonte de pixel no estilo do GBA: 7 linhas (+2 de descida). "/" separa as linhas.
+_FONTE_GBA_TXT = {
+    "A": ".###./#...#/#...#/#####/#...#/#...#/#...#", "B": "####./#...#/#...#/####./#...#/#...#/####.",
+    "C": ".###./#...#/#..../#..../#..../#...#/.###.", "D": "####./#...#/#...#/#...#/#...#/#...#/####.",
+    "E": "#####/#..../#..../####./#..../#..../#####", "F": "#####/#..../#..../####./#..../#..../#....",
+    "G": ".###./#...#/#..../#.###/#...#/#...#/.###.", "H": "#...#/#...#/#...#/#####/#...#/#...#/#...#",
+    "I": "###/.#./.#./.#./.#./.#./###", "J": "..###/...#./...#./...#./#..#./#..#./.##..",
+    "K": "#...#/#..#./#.#../##.../#.#../#..#./#...#", "L": "#..../#..../#..../#..../#..../#..../#####",
+    "M": "#...#/##.##/#.#.#/#.#.#/#...#/#...#/#...#", "N": "#...#/##..#/#.#.#/#..##/#...#/#...#/#...#",
+    "O": ".###./#...#/#...#/#...#/#...#/#...#/.###.", "P": "####./#...#/#...#/####./#..../#..../#....",
+    "Q": ".###./#...#/#...#/#...#/#.#.#/#..#./.##.#", "R": "####./#...#/#...#/####./#.#../#..#./#...#",
+    "S": ".###./#...#/#..../.###./....#/#...#/.###.", "T": "#####/..#../..#../..#../..#../..#../..#..",
+    "U": "#...#/#...#/#...#/#...#/#...#/#...#/.###.", "V": "#...#/#...#/#...#/#...#/.#.#./.#.#./..#..",
+    "W": "#...#/#...#/#...#/#.#.#/#.#.#/##.##/#...#", "X": "#...#/#...#/.#.#./..#../.#.#./#...#/#...#",
+    "Y": "#...#/#...#/.#.#./..#../..#../..#../..#..", "Z": "#####/....#/...#./..#../.#.../#..../#####",
+    "a": "...../...../.###./....#/.####/#...#/.####", "b": "#..../#..../####./#...#/#...#/#...#/####.",
+    "c": "...../...../.###./#..../#..../#..../.###.", "d": "....#/....#/.####/#...#/#...#/#...#/.####",
+    "e": "...../...../.###./#...#/#####/#..../.###.", "f": "..##/.#../####/.#../.#../.#../.#..",
+    "g": "...../...../.####/#...#/#...#/#...#/.####/....#/.###.", "h": "#..../#..../####./#...#/#...#/#...#/#...#",
+    "i": "#/./#/#/#/#/#", "j": "..#/.../..#/..#/..#/..#/..#/..#/##.", "k": "#.../#.../#..#/#.#./##../#.#./#..#",
+    "l": "#./#./#./#./#./#./.#", "m": "...../...../##.#./#.#.#/#.#.#/#.#.#/#.#.#",
+    "n": "...../...../####./#...#/#...#/#...#/#...#", "o": "...../...../.###./#...#/#...#/#...#/.###.",
+    "p": "...../...../####./#...#/#...#/#...#/####./#..../#....",
+    "q": "...../...../.####/#...#/#...#/#...#/.####/....#/....#", "r": "..../..../#.##/##../#.../#.../#...",
+    "s": "...../...../.####/#..../.###./....#/####.", "t": ".#../.#../####/.#../.#../.#../..##",
+    "u": "...../...../#...#/#...#/#...#/#...#/.####", "v": "...../...../#...#/#...#/#...#/.#.#./..#..",
+    "w": "...../...../#...#/#...#/#.#.#/#.#.#/.#.#.", "x": "...../...../#...#/.#.#./..#../.#.#./#...#",
+    "y": "...../...../#...#/#...#/#...#/#...#/.####/....#/.###.", "z": "...../...../#####/...#./..#../.#.../#####",
+    "0": ".###./#...#/#..##/#.#.#/##..#/#...#/.###.", "1": ".#./##./.#./.#./.#./.#./###",
+    "2": ".###./#...#/....#/...#./..#../.#.../#####", "3": ".###./#...#/....#/..##./....#/#...#/.###.",
+    "4": "...#./..##./.#.#./#..#./#####/...#./...#.", "5": "#####/#..../####./....#/....#/#...#/.###.",
+    "6": ".###./#..../#..../####./#...#/#...#/.###.", "7": "#####/....#/...#./..#../.#.../.#.../.#...",
+    "8": ".###./#...#/#...#/.###./#...#/#...#/.###.", "9": ".###./#...#/#...#/.####/....#/....#/.###.",
+    "!": "#/#/#/#/#/./#", ".": "./././././.#", ",": "../../../../../.#/#.", "'": "#/#/./././././",
+    "?": ".###./#...#/....#/...#./..#../...../..#..", "-": "..../..../..../####/..../..../....",
+    "/": "...#/...#/..#./.#../.#../#.../#...", ":": "./././#/./#/.", "é": "...#./..#../.###./#...#/#####/#..../.###.",
+    "♂": "..###/...##/..#.#/.##../#..#./#..#./.##..", "♀": ".###./#...#/#...#/.###./..#../.###./..#..",
+    "▶": "#.../##../###./####/###./##../#...", "▼": "...../...../#####/.###./..#../...../.....",
+}
+FONTE_GBA = {c: [l for l in s.split("/")] for c, s in _FONTE_GBA_TXT.items()}
+MINI_HP = {"H": ["#.#", "#.#", "###", "#.#", "#.#"], "P": ["##.", "#.#", "##.", "#..", "#.."],
+           "L": ["#..", "#..", "#..", "#..", "###"], "v": ["...", "#.#", "#.#", "#.#", ".#."]}
+# Pokémon que flutuam acima da plataforma (em pixels)
+FLUTUAM = {12: 10, 15: 8, 41: 14, 42: 12, 49: 10, 81: 12, 82: 10, 92: 12, 93: 10, 109: 10, 110: 8, 142: 10, 151: 12}
+
+
+def largura_gba(txt):
+    return sum(3 if c == " " else len(FONTE_GBA.get(c, FONTE_GBA["?"])[0]) + 1 for c in txt)
+
+
+def quebrar_gba(txt, maximo):
+    linhas, atual = [], ""
+    for p in txt.split():
+        teste = atual + " " + p if atual else p
+        if atual and largura_gba(teste) > maximo:
+            linhas.append(atual)
+            atual = p
+        else:
+            atual = teste
+    if atual:
+        linhas.append(atual)
+    return linhas or [""]
+
+
+def pixels_para_celulas_k(px, vw, k, w, h, ch, co, desloc=0):
+    """Como pixels_para_celulas, mas com o buffer virtual ampliado k vezes (e deslocado pra tremer)."""
+    lim = len(px)
+    for y in range(h):
+        ra = ((2 * y) // k) * vw
+        rb = ((2 * y + 1) // k) * vw
+        c0 = y * w
+        for x in range(w):
+            sx = (x - desloc) // k
+            if sx < 0 or sx >= vw:
+                ch[c0 + x] = " "
+                continue
+            ia, ib = ra + sx, rb + sx
+            a = px[ia] if ia < lim else 0
+            b = px[ib] if ib < lim else 0
+            i = c0 + x
+            if a == b:
+                if a:
+                    ch[i], co[i] = "█", a
+                else:
+                    ch[i] = " "
+            elif not b:
+                ch[i], co[i] = "▀", a
+            elif not a:
+                ch[i], co[i] = "▄", b
+            else:
+                ch[i], co[i] = "▀", a | (b << 24) | BG
+
+
+# golpes por tipo: (nome, poder, pp, animação)
+GOLPES = {
+    "NORMAL": [("TACKLE", 35, 35, "investida"), ("SCRATCH", 40, 35, "arranhao"), ("POUND", 40, 35, "investida"),
+               ("QUICK ATTACK", 40, 30, "rapido"), ("HEADBUTT", 70, 15, "investida"), ("SLASH", 70, 20, "arranhao"),
+               ("BODY SLAM", 85, 15, "investida"), ("HYPER FANG", 80, 15, "mordida")],
+    "FIRE": [("EMBER", 40, 25, "brasas"), ("FIRE SPIN", 15, 15, "redemoinho"), ("FIRE PUNCH", 75, 15, "soco_fogo"),
+             ("FLAMETHROWER", 95, 15, "lanca_chamas")],
+    "WATER": [("BUBBLE", 20, 30, "bolhas"), ("WATER GUN", 40, 25, "jato"), ("BUBBLEBEAM", 65, 20, "bolhas"),
+              ("SURF", 95, 15, "onda"), ("HYDRO PUMP", 120, 5, "jato")],
+    "ELECTRIC": [("THUNDERSHOCK", 40, 30, "raio"), ("THUNDERPUNCH", 75, 15, "soco_raio"),
+                 ("THUNDERBOLT", 95, 15, "raio"), ("THUNDER", 120, 10, "trovao")],
+    "GRASS": [("ABSORB", 20, 20, "dreno"), ("VINE WHIP", 35, 10, "chicote"), ("MEGA DRAIN", 40, 10, "dreno"),
+              ("RAZOR LEAF", 55, 25, "folhas"), ("PETAL DANCE", 70, 20, "folhas"), ("SOLARBEAM", 120, 10, "solar")],
+    "ICE": [("POWDER SNOW", 40, 25, "neve"), ("AURORA BEAM", 65, 20, "feixe_gelo"), ("ICE PUNCH", 75, 15, "soco_gelo"),
+            ("ICE BEAM", 95, 10, "feixe_gelo")],
+    "FIGHTING": [("DOUBLE KICK", 30, 30, "golpes"), ("KARATE CHOP", 50, 25, "golpes"), ("LOW KICK", 50, 20, "golpes"),
+                 ("SUBMISSION", 80, 25, "investida")],
+    "POISON": [("POISON STING", 15, 35, "ferrao"), ("SMOG", 20, 20, "fumaca"), ("ACID", 40, 30, "acido"),
+               ("SLUDGE", 65, 20, "acido")],
+    "GROUND": [("MUD-SLAP", 20, 10, "lama"), ("DIG", 60, 10, "tremor"), ("BONE CLUB", 65, 20, "investida"),
+               ("EARTHQUAKE", 100, 10, "tremor")],
+    "FLYING": [("PECK", 35, 35, "bicada"), ("GUST", 40, 35, "vento"), ("WING ATTACK", 60, 35, "investida"),
+               ("DRILL PECK", 80, 20, "bicada")],
+    "PSYCHIC": [("CONFUSION", 50, 25, "psiquico"), ("PSYBEAM", 65, 20, "psiquico"), ("PSYCHIC", 90, 10, "psiquico")],
+    "BUG": [("PIN MISSILE", 14, 20, "ferrao"), ("LEECH LIFE", 20, 15, "dreno"), ("TWINEEDLE", 25, 20, "ferrao")],
+    "ROCK": [("ROCK THROW", 50, 15, "pedras"), ("ROCK SLIDE", 75, 10, "pedras")],
+    "GHOST": [("LICK", 20, 30, "sombra"), ("NIGHT SHADE", 40, 15, "sombra"), ("SHADOW BALL", 80, 15, "sombra")],
+    "DRAGON": [("TWISTER", 40, 20, "vento"), ("DRAGON RAGE", 40, 10, "dragao"), ("DRAGONBREATH", 60, 20, "dragao")],
+    "STEEL": [("METAL CLAW", 50, 35, "arranhao"), ("STEEL WING", 70, 25, "investida")],
+    "DARK": [("BITE", 60, 25, "mordida"), ("FAINT ATTACK", 60, 20, "investida")],
+}
+# golpes de status: (nome, efeito, pp)
+STATUS_GOLPES = {"SPLASH": ("nada", 40), "GROWL": ("atk-", 40), "TAIL WHIP": ("def-", 30), "LEER": ("def-", 30), "SAND-ATTACK": ("acc-", 15),
+                 "STRING SHOT": ("spd-", 40), "DEFENSE CURL": ("def+", 40), "HARDEN": ("def+", 30),
+                 "AGILITY": ("spd+", 30), "THUNDER WAVE": ("par", 20), "SLEEP POWDER": ("sono", 15),
+                 "POISONPOWDER": ("veneno", 35), "LEECH SEED": ("semente", 10), "CONFUSE RAY": ("conf", 10),
+                 "SUPERSONIC": ("conf", 20)}
+STATUS_POR_TIPO = {"ELECTRIC": ["THUNDER WAVE"], "GRASS": ["SLEEP POWDER", "POISONPOWDER", "LEECH SEED"],
+                   "BUG": ["STRING SHOT", "POISONPOWDER"], "GHOST": ["CONFUSE RAY"], "POISON": ["POISONPOWDER"],
+                   "GROUND": ["SAND-ATTACK"], "FLYING": ["SAND-ATTACK", "AGILITY"], "PSYCHIC": ["AGILITY"]}
+STATUS_COMUNS = ["GROWL", "TAIL WHIP", "LEER", "DEFENSE CURL", "HARDEN", "SUPERSONIC"]
+TIPO_STATUS = {"THUNDER WAVE": "ELECTRIC", "SLEEP POWDER": "GRASS", "POISONPOWDER": "POISON", "LEECH SEED": "GRASS",
+               "STRING SHOT": "BUG", "CONFUSE RAY": "GHOST", "SAND-ATTACK": "GROUND", "AGILITY": "PSYCHIC"}
+# tabela de tipos da 3ª geração: atacante -> {defensor: multiplicador}
+_TABELA = {
+    "NORMAL": ("", "ROCK STEEL", "GHOST"),
+    "FIRE": ("GRASS ICE BUG STEEL", "FIRE WATER ROCK DRAGON", ""),
+    "WATER": ("FIRE GROUND ROCK", "WATER GRASS DRAGON", ""),
+    "ELECTRIC": ("WATER FLYING", "ELECTRIC GRASS DRAGON", "GROUND"),
+    "GRASS": ("WATER GROUND ROCK", "FIRE GRASS POISON FLYING BUG DRAGON STEEL", ""),
+    "ICE": ("GRASS GROUND FLYING DRAGON", "FIRE WATER ICE STEEL", ""),
+    "FIGHTING": ("NORMAL ICE ROCK DARK STEEL", "POISON FLYING PSYCHIC BUG", "GHOST"),
+    "POISON": ("GRASS", "POISON GROUND ROCK GHOST", "STEEL"),
+    "GROUND": ("FIRE ELECTRIC POISON ROCK STEEL", "GRASS BUG", "FLYING"),
+    "FLYING": ("GRASS FIGHTING BUG", "ELECTRIC ROCK STEEL", ""),
+    "PSYCHIC": ("FIGHTING POISON", "PSYCHIC STEEL", "DARK"),
+    "BUG": ("GRASS PSYCHIC DARK", "FIRE FIGHTING POISON FLYING GHOST STEEL", ""),
+    "ROCK": ("FIRE ICE FLYING BUG", "FIGHTING GROUND STEEL", ""),
+    "GHOST": ("PSYCHIC GHOST", "DARK STEEL", "NORMAL"),
+    "DRAGON": ("DRAGON", "STEEL", ""),
+    "DARK": ("PSYCHIC GHOST", "FIGHTING DARK STEEL", ""),
+    "STEEL": ("ICE ROCK", "FIRE WATER ELECTRIC STEEL", ""),
+}
+TIPOS_MULT = {a: {**{d: 2.0 for d in f.split()}, **{d: 0.5 for d in m.split()}, **{d: 0.0 for d in z.split()}}
+              for a, (f, m, z) in _TABELA.items()}
+SEM_GENERO = {81, 82, 100, 101, 120, 121, 132, 137, 144, 145, 146, 150, 151}
+SO_MACHO = {32, 33, 34, 106, 107, 128}
+SO_FEMEA = {29, 30, 31, 113, 115, 124}
+FRASES_STATUS = {"atk-": "{a}'s ATTACK fell!", "def-": "{a}'s DEFENSE fell!", "acc-": "{a}'s accuracy fell!",
+                 "spd-": "{a}'s SPEED fell!", "def+": "{a}'s DEFENSE rose!", "spd+": "{a}'s SPEED sharply rose!"}
+
+
+class Pokemon(Cena):
+    """Batalha de Pokémon no estilo FireRed com os sprites oficiais do GBA, na resolução do GBA."""
+    combinavel = False
+    duracao = (80, 110)
+    perfil = "ScreensaverMini"
+    min_px = (240, 160)
+    CEU = (0xF8F8E8, 0xE0ECC8)
+    PLAT = (0x90B880, 0xB0D498, 0xC4E4AC)
+    PAINEL, PAINEL_BORDA, PAINEL_SOMBRA = 0xF8F8D8, 0x404040, 0xC8C8A8
+    TEXTO, TEXTO_SOMBRA = 0x404040, 0xD8D0B0
+    CAIXA, CAIXA_BORDA, CAIXA_BORDA2 = 0x283848, 0xE0E8F0, 0x506070
+    MENU, MENU_BORDA, MENU_BORDA2, MENU_TEXTO, MENU_SOMBRA = 0xF8F8F8, 0x6868A0, 0xC8C8E8, 0x484848, 0xD0D0C8
+    BARRA_FUNDO = 0x506058
+    HP_CORES = ((0x70F8A8, 0x58D080), (0xF8E038, 0xC8A808), (0xF85838, 0xA84020))
+
+    @classmethod
+    def disponivel(cls):
+        return len(pokedex()) >= 151
+
+    def iniciar(self):
+        w, h = self.w, self.h
+        self.k = max(1, min(w // 240, (2 * h) // 160))
+        self.vw, self.vh = max(240, w // self.k), max(160, (2 * h) // self.k)
+        self.ox, self.oy = (self.vw - 240) // 2, (self.vh - 160) // 2
+        self.px = [0] * (self.vw * self.vh)
+        fundo_ = []
+        c0, c1 = self.CEU
+        for y in range(self.vh):
+            gy = y - self.oy
+            if gy >= 112:
+                c = self.CAIXA
+            else:
+                c = misturar(c0, c1, clamp(gy / 112))
+                if gy % 4 == 1:
+                    c = misturar(c, 0xFFFFFF, 0.45)
+            fundo_.extend([c] * self.vw)
+        self.fundo = fundo_
+        self.plat = {"i": self.plataforma(176, 61, 58, 12), "j": self.plataforma(74, 116, 70, 16)}
+        self.t = self.dt = 0.0
+        self.estado_inicial()
+        self.gen = self.roteiro()
+
+    def plataforma(self, cx, cy, rx, ry):
+        out = []
+        for dy in range(-ry - 1, ry + 2):
+            for dx in range(-rx - 1, rx + 2):
+                e = (dx / rx) ** 2 + (dy / ry) ** 2
+                if e <= 1:
+                    c = self.PLAT[0] if e > 0.82 else self.PLAT[1] if e > 0.45 else self.PLAT[2]
+                    out.append((cx + dx, cy + dy, c))
+        return out
+
+    def estado_inicial(self):
+        self.lut = None
+        self.vis = {"j": False, "i": False}
+        self.off = {"j": [0, 0], "i": [0, 0]}
+        self.pisca = {"j": False, "i": False}
+        self.afunda = {"j": 0, "i": 0}
+        self.escala_spr = {"j": 1.0, "i": 1.0}
+        self.branco = {"j": 0.0, "i": 0.0}
+        self.tinta = {"j": None, "i": None}
+        self.plat_off = [0, 0]
+        self.painel_off = {"i": 0, "j": 0}
+        self.info = {"i": False, "j": False}
+        self.hpv = {"j": 0.0, "i": 0.0}
+        self.expv = random.uniform(0, 0.7)
+        self.menu = None
+        self.texto = ["", ""]
+        self.seta = False
+        self.fx = []
+        self.flash = 0.0
+        self.escuro = 0.0
+        self.cor_fade = 0x000000
+        self.cortina = 0.0
+        self.balanco = False
+        self.bola = None
+        self.tremor = 0
+
+    # --- dados da batalha
+
+    def lutador(self, num, nivel, costas):
+        if num == 0:
+            shiny = random.random() < 0.15
+            spr = sprite_rola_gba(shiny)
+            golpes = [("HARDEN", 0, 30, "status"), ("SPLASH", 0, 40, "status"), ("TACKLE", 35, 35, "investida"),
+                      ("BODY SLAM", 85, 15, "investida")]
+            return self.montar_lutador(0, "ROLA", ["NORMAL"], nivel, shiny, spr, golpes, "♂")
+        d = pokedex()[num]
+        shiny = random.random() < (0.04 if costas else 0.08)
+        chave = ("bs" if shiny else "b") if costas else ("fs" if shiny else "f")
+        tipos = d["tipos"]
+        golpes = []
+        forte = nivel >= 25
+        for t in tipos[:2]:
+            pool = GOLPES.get(t, GOLPES["NORMAL"])
+            pool = pool if forte else pool[:max(1, (len(pool) + 1) // 2)]
+            golpes.append(random.choice(pool))
+        if len(golpes) < 2:
+            golpes.append(random.choice(GOLPES[tipos[0]] if tipos[0] in GOLPES else GOLPES["NORMAL"]))
+        golpes.append(random.choice(GOLPES["NORMAL"][:5] if not forte else GOLPES["NORMAL"]))
+        opcoes = [s for t in tipos for s in STATUS_POR_TIPO.get(t, [])] or STATUS_COMUNS
+        if random.random() < 0.4:
+            opcoes = STATUS_COMUNS
+        st = random.choice(opcoes)
+        golpes.append((st, 0, STATUS_GOLPES[st][1], "status"))
+        vistos, unicos = set(), []
+        for g in golpes:
+            if g[0] not in vistos:
+                vistos.add(g[0])
+                unicos.append(g)
+        while len(unicos) < 4:
+            g = random.choice(GOLPES["NORMAL"])
+            if g[0] not in vistos:
+                vistos.add(g[0])
+                unicos.append(g)
+        unicos = unicos[:4]
+        random.shuffle(unicos)
+        genero = "" if num in SEM_GENERO else "♂" if num in SO_MACHO else "♀" if num in SO_FEMEA else random.choice("♂♂♀")
+        return self.montar_lutador(num, d["nome"], tipos, nivel, shiny, grade_sprite(d[chave]), unicos, genero)
+
+    def montar_lutador(self, num, nome, tipos, nivel, shiny, spr, unicos, genero):
+        mx = nivel * 2 + 10 + random.randint(0, nivel // 2 + 3)
+        linhas_ = [y for y, l in enumerate(spr) if any(l)]
+        cols = [x for x in range(len(spr[0])) if any(l[x] for l in spr)]
+        caixa = (min(cols), min(linhas_), max(cols), max(linhas_)) if linhas_ else (0, 0, 63, 63)
+        return {"num": num, "nome": nome, "tipos": tipos, "nivel": nivel, "hp": mx, "max": mx, "shiny": shiny,
+                "spr": spr, "caixa": caixa, "golpes": unicos, "pp": [g[2] for g in unicos], "genero": genero,
+                "status": None, "sono": 0, "conf": 0, "semente": False}
+
+    def tipo_golpe(self, g):
+        if g[3] == "status":
+            return TIPO_STATUS.get(g[0], "NORMAL")
+        for t, lista in GOLPES.items():
+            if any(x[0] == g[0] for x in lista):
+                return t
+        return "NORMAL"
+
+    def nome_b(self, lado):
+        return ("Wild " if lado == "i" else "") + self.lut[lado]["nome"]
+
+    def pos(self, lado):
+        P = self.lut[lado]
+        fundo_spr = P["caixa"][3]
+        if lado == "i":
+            x, y = 144, 64 - fundo_spr - FLUTUAM.get(P["num"], 0)
+        else:
+            x, y = 40, 48 + min(16, 63 - fundo_spr)
+        ox = self.plat_off[0 if lado == "i" else 1]
+        return x + ox + self.off[lado][0], y + self.off[lado][1]
+
+    def centro(self, lado):
+        x, y = self.pos(lado)
+        x0, y0, x1, y1 = self.lut[lado]["caixa"]
+        return x + (x0 + x1) / 2, y + (y0 + y1) / 2
+
+    # --- roteiro (geradores: cada yield é um quadro)
+
+    def roteiro(self):
+        while True:
+            yield from self.batalha()
+
+    def dizer(self, txt, pausa=1.1):
+        linhas = quebrar_gba(txt, 208)
+        for k in range(0, len(linhas), 2):
+            par = linhas[k:k + 2]
+            total = sum(len(l) for l in par)
+            ini = self.t
+            while True:
+                n = int((self.t - ini) * 38)
+                resto, vis = n, []
+                for l in par:
+                    vis.append(l[:max(0, resto)])
+                    resto -= len(l)
+                self.texto = (vis + ["", ""])[:2]
+                if n >= total:
+                    break
+                yield
+            self.seta = True
+            yield from self.esperar(pausa)
+            self.seta = False
+        self.texto = ["", ""]
+
+    def batalha(self):
+        self.estado_inicial()
+        nj = random.randint(5, 55)
+        ni = max(2, min(70, nj + random.randint(-6, 4)))
+        jn = random.randint(1, 151)
+        inn = random.choice([n for n in range(1, 152) if n != jn]) if random.random() > 0.05 and not OVOS else 0
+        self.lut = {"j": self.lutador(jn, nj, True), "i": self.lutador(inn, ni, False)}
+        self.hpv = {k: float(v["hp"]) for k, v in self.lut.items()}
+        J, I = self.lut["j"], self.lut["i"]
+        for _ in range(2):
+            self.flash = 1.0
+            yield from self.esperar(0.08)
+            self.flash = 0.0
+            yield from self.esperar(0.08)
+        ini = self.t
+        while self.t - ini < 0.6:
+            self.cortina = (self.t - ini) / 0.6
+            yield
+        self.cortina = 1.0
+        yield from self.esperar(0.25)
+        self.cortina = 0.0
+        self.vis["i"] = True
+        ini = self.t
+        while self.t - ini < 1.1:
+            p = 1 - suave((self.t - ini) / 1.1)
+            self.plat_off = [int(-p * 240), int(p * 240)]
+            yield
+        self.plat_off = [0, 0]
+        yield from self.deslizar_painel("i")
+        if I["shiny"]:
+            yield from self.brilho_shiny("i")
+        yield from self.dizer(f"Wild {I['nome']} appeared!")
+        yield from self.dizer(f"Go! {J['nome']}!", pausa=0.2)
+        yield from self.lancar_bola()
+        yield from self.deslizar_painel("j")
+        if J["shiny"]:
+            yield from self.brilho_shiny("j")
+        while True:
+            g = yield from self.escolher()
+            ordem = [("j", "i", g), ("i", "j", random.choice(I["golpes"]))]
+            if random.random() < 0.3:
+                ordem.reverse()
+            acabou = False
+            for a, d, golpe in ordem:
+                yield from self.turno(a, d, golpe)
+                if J["hp"] <= 0 or I["hp"] <= 0:
+                    acabou = True
+                    break
+            if not acabou:
+                for lado in ("j", "i"):
+                    yield from self.fim_de_turno(lado)
+                    if J["hp"] <= 0 or I["hp"] <= 0:
+                        acabou = True
+                        break
+            if acabou:
+                break
+        if I["hp"] <= 0:
+            yield from self.desmaiar("i")
+            yield from self.dizer(f"Wild {I['nome']} fainted!")
+            ganho = random.randint(max(10, ni * 5), max(30, ni * 12))
+            yield from self.dizer(f"{J['nome']} gained {ganho} EXP. Points!", pausa=0.2)
+            alvo = self.expv + random.uniform(0.25, 0.8)
+            while self.expv < min(alvo, 1.0):
+                self.expv = min(alvo, 1.0, self.expv + self.dt * 0.6)
+                yield
+            if alvo >= 1:
+                J["nivel"] += 1
+                self.expv = 0.0
+                yield from self.dizer(f"{J['nome']} grew to LV. {J['nivel']}!")
+            yield from self.esperar(0.6)
+            self.cor_fade = 0x000000
+        else:
+            yield from self.desmaiar("j")
+            yield from self.dizer(f"{J['nome']} fainted!")
+            yield from self.dizer("RED is out of usable POKéMON!")
+            yield from self.dizer("RED whited out!")
+            self.cor_fade = 0xFFFFFF
+        ini = self.t
+        while self.t - ini < 0.8:
+            self.escuro = (self.t - ini) / 0.8
+            yield
+        yield from self.esperar(0.5)
+
+    def deslizar_painel(self, lado):
+        self.info[lado] = True
+        ini = self.t
+        while self.t - ini < 0.35:
+            p = 1 - suave((self.t - ini) / 0.35)
+            self.painel_off[lado] = int(p * 130) * (-1 if lado == "i" else 1)
+            yield
+        self.painel_off[lado] = 0
+
+    def brilho_shiny(self, lado):
+        ini = self.t
+        while self.t - ini < 1.3:
+            x, y = self.pos(lado)
+            self.fx = [("estrela", x + random.uniform(8, 56), y + random.uniform(8, 60), random.uniform(2, 4),
+                        random.choice((0xFFFFFF, 0xFFF4A0, 0xA8E8FF))) for _ in range(5)]
+            yield from self.esperar(0.07)
+        self.fx = []
+
+    def lancar_bola(self):
+        x0, y0, x1, y1 = -8.0, 60.0, 72.0, 92.0
+        ini = self.t
+        while self.t - ini < 0.7:
+            p = (self.t - ini) / 0.7
+            self.bola = (x0 + (x1 - x0) * p, y0 + (y1 - y0) * p - math.sin(p * math.pi) * 34)
+            yield
+        self.bola = None
+        self.vis["j"] = True
+        ini = self.t
+        while self.t - ini < 0.4:
+            p = (self.t - ini) / 0.4
+            self.escala_spr["j"] = 0.15 + 0.85 * p
+            self.branco["j"] = 1.0
+            self.fx = [("anel", x1, y1, 3 + p * 28, misturar(0xFFFFFF, 0xF8F8B0, p)), ("anel", x1, y1, 1 + p * 18, 0xFFFFFF)]
+            yield
+        self.escala_spr["j"] = 1.0
+        self.fx = []
+        ini = self.t
+        while self.t - ini < 0.35:
+            self.branco["j"] = 1 - (self.t - ini) / 0.35
+            yield
+        self.branco["j"] = 0.0
+
+    def escolher(self):
+        J = self.lut["j"]
+        self.texto = ["What will", f"{J['nome']} do?"]
+        self.menu = ("cmd", 0)
+        self.balanco = True
+        yield from self.esperar(random.uniform(0.9, 1.5))
+        if random.random() < 0.3:
+            self.menu = ("cmd", random.choice((1, 2, 3)))
+            yield from self.esperar(0.4)
+            self.menu = ("cmd", 0)
+            yield from self.esperar(0.35)
+        pesos = [1 if g[3] == "status" else 3 for g in J["golpes"]]
+        idx = random.choices(range(len(J["golpes"])), weights=pesos)[0]
+        self.texto = ["", ""]
+        self.menu = ("golpes", 0)
+        yield from self.esperar(0.55)
+        for k in ([1] if idx in (1, 3) else []) + ([idx] if idx in (2, 3) else []):
+            self.menu = ("golpes", k)
+            yield from self.esperar(0.3)
+        yield from self.esperar(0.45)
+        self.menu = None
+        self.balanco = False
+        J["pp"][idx] = max(0, J["pp"][idx] - 1)
+        return J["golpes"][idx]
+
+    def turno(self, a, d, golpe):
+        A, D = self.lut[a], self.lut[d]
+        if A["status"] == "sono":
+            A["sono"] -= 1
+            if A["sono"] <= 0:
+                A["status"] = None
+                yield from self.dizer(f"{self.nome_b(a)} woke up!")
+            else:
+                yield from self.dizer(f"{self.nome_b(a)} is fast asleep.")
+                return
+        if A["status"] == "par" and random.random() < 0.25:
+            yield from self.dizer(f"{self.nome_b(a)} is paralyzed! It can't move!")
+            return
+        if A["conf"] > 0:
+            A["conf"] -= 1
+            if A["conf"] == 0:
+                yield from self.dizer(f"{self.nome_b(a)} snapped out of confusion!")
+            else:
+                yield from self.dizer(f"{self.nome_b(a)} is confused!", pausa=0.6)
+                if random.random() < 0.5:
+                    yield from self.dizer("It hurt itself in its confusion!", pausa=0.3)
+                    yield from self.dano(a, max(1, A["max"] // 10))
+                    return
+        nome, poder, _pp, estilo = golpe
+        yield from self.dizer(f"{self.nome_b(a)} used {nome}!", pausa=0.3)
+        if estilo == "status":
+            efeito = STATUS_GOLPES[nome][0]
+            alvo = a if efeito.endswith("+") else d
+            if efeito == "nada":
+                for dy in (-6, 0, -6, 0):
+                    self.off[a][1] = dy
+                    yield from self.esperar(0.12)
+                yield from self.dizer("But nothing happened!")
+                return
+            yield from self.anim_status(a, d, nome, efeito)
+            if efeito in FRASES_STATUS:
+                for _ in range(3):
+                    self.tinta[alvo] = (0xF87050 if efeito.endswith("+") else 0x4870F0, 0.5)
+                    yield from self.esperar(0.1)
+                    self.tinta[alvo] = None
+                    yield from self.esperar(0.08)
+                yield from self.dizer(FRASES_STATUS[efeito].format(a=self.nome_b(alvo)))
+            elif efeito == "conf":
+                if D["conf"]:
+                    yield from self.dizer(f"{self.nome_b(d)} is already confused!")
+                else:
+                    D["conf"] = random.randint(2, 5)
+                    yield from self.dizer(f"{self.nome_b(d)} became confused!")
+            elif efeito == "semente":
+                if "GRASS" in D["tipos"] or D["semente"]:
+                    yield from self.dizer(f"{self.nome_b(d)} evaded the attack!")
+                else:
+                    D["semente"] = a
+                    yield from self.dizer(f"{self.nome_b(d)} was seeded!")
+            else:
+                if D["status"]:
+                    yield from self.dizer("But it failed!")
+                elif efeito == "par":
+                    D["status"] = "par"
+                    yield from self.dizer(f"{self.nome_b(d)} is paralyzed! It may be unable to move!")
+                elif efeito == "sono":
+                    D["status"], D["sono"] = "sono", random.randint(1, 3)
+                    yield from self.dizer(f"{self.nome_b(d)} fell asleep!")
+                else:
+                    D["status"] = "veneno"
+                    yield from self.dizer(f"{self.nome_b(d)} was poisoned!")
+            return
+        if random.random() < 0.06:
+            yield from self.dizer(f"{self.nome_b(a)}'s attack missed!")
+            return
+        tipo = self.tipo_golpe(golpe)
+        mult = 1.0
+        for t in D["tipos"]:
+            mult *= TIPOS_MULT.get(tipo, {}).get(t, 1.0)
+        if mult == 0:
+            yield from self.dizer(f"It doesn't affect {self.nome_b(d)}...")
+            return
+        yield from self.anim(a, d, estilo)
+        crit = random.random() < 0.0625
+        stab = 1.5 if tipo in A["tipos"] else 1.0
+        base = (2 * A["nivel"] / 5 + 2) * poder / 50 + 2
+        dano = max(1, int(base * stab * mult * random.uniform(0.85, 1.0) * (2 if crit else 1)))
+        yield from self.dano(d, dano, piscar=True)
+        if crit:
+            yield from self.dizer("A critical hit!")
+        if mult > 1:
+            yield from self.dizer("It's super effective!")
+        elif mult < 1:
+            yield from self.dizer("It's not very effective...")
+        if estilo == "dreno" and A["hp"] > 0:
+            cura = max(1, dano // 2)
+            yield from self.curar(a, cura)
+            yield from self.dizer(f"{self.nome_b(d)} had its energy drained!")
+
+    def fim_de_turno(self, lado):
+        P = self.lut[lado]
+        if P["hp"] <= 0:
+            return
+        if P["status"] == "veneno":
+            yield from self.anim_status(lado, lado, "", "veneno")
+            yield from self.dizer(f"{self.nome_b(lado)} is hurt by poison!", pausa=0.4)
+            yield from self.dano(lado, max(1, P["max"] // 8))
+        if P["semente"] and P["hp"] > 0:
+            outro = P["semente"]
+            yield from self.dizer(f"{self.nome_b(lado)}'s health is sapped by LEECH SEED!", pausa=0.4)
+            q = max(1, P["max"] // 8)
+            yield from self.dano(lado, q)
+            if self.lut[outro]["hp"] > 0:
+                yield from self.curar(outro, q)
+
+    def dano(self, lado, q, piscar=False):
+        if piscar:
+            for _ in range(4):
+                self.pisca[lado] = True
+                yield from self.esperar(0.06)
+                self.pisca[lado] = False
+                yield from self.esperar(0.06)
+        P = self.lut[lado]
+        novo = max(0, P["hp"] - q)
+        P["hp"] = novo
+        while self.hpv[lado] > novo:
+            self.hpv[lado] = max(novo, self.hpv[lado] - self.dt * P["max"] * 0.5)
+            yield
+
+    def curar(self, lado, q):
+        P = self.lut[lado]
+        novo = min(P["max"], P["hp"] + q)
+        P["hp"] = novo
+        while self.hpv[lado] < novo:
+            self.hpv[lado] = min(novo, self.hpv[lado] + self.dt * P["max"] * 0.5)
+            yield
+
+    def desmaiar(self, lado):
+        ini = self.t
+        while self.t - ini < 0.5:
+            self.afunda[lado] = int(64 * (self.t - ini) / 0.5)
+            yield
+        self.vis[lado] = False
+        self.info[lado] = False
+        self.afunda[lado] = 0
+
+    # --- animações dos golpes
+
+    def projeteis(self, a, d, cores, raio, n=3, arco=8, dur=0.3, rastro=True):
+        ax, ay = self.centro(a)
+        dx, dy = self.centro(d)
+        for _ in range(n):
+            ini = self.t
+            while self.t - ini < dur:
+                p = (self.t - ini) / dur
+                x = ax + (dx - ax) * p
+                y = ay + (dy - ay) * p - math.sin(p * math.pi) * arco
+                self.fx = []
+                if rastro:
+                    for k in range(1, 3):
+                        self.fx.append(("disco", x - (dx - ax) * 0.05 * k, y - (dy - ay) * 0.05 * k, raio * (1 - k * 0.3), cores[-1]))
+                self.fx.append(("disco", x, y, raio, cores[0]))
+                if len(cores) > 1:
+                    self.fx.append(("disco", x - raio * 0.3, y - raio * 0.3, raio * 0.45, cores[1]))
+                yield
+
+    def jato(self, a, d, cor, claro, dur=0.7, arco=12, r=2.4):
+        ax, ay = self.centro(a)
+        dx, dy = self.centro(d)
+        ini = self.t
+        while self.t - ini < dur:
+            p = (self.t - ini) / dur
+            self.fx = []
+            for k in range(18):
+                q = p * 1.7 - k * 0.05
+                if 0 <= q <= 1:
+                    x = ax + (dx - ax) * q
+                    y = ay + (dy - ay) * q - math.sin(q * math.pi) * arco
+                    self.fx.append(("disco", x, y, r, cor))
+                    self.fx.append(("disco", x - 0.6, y - 0.6, r * 0.4, claro))
+            yield
+
+    def feixe(self, a, d, cor, claro, dur=0.6, esp=2):
+        ax, ay = self.centro(a)
+        dx, dy = self.centro(d)
+        ini = self.t
+        while self.t - ini < dur:
+            p = min(1.0, (self.t - ini) / (dur * 0.5))
+            x1, y1 = ax + (dx - ax) * p, ay + (dy - ay) * p
+            self.fx = [("linha", ax, ay + o, x1, y1 + o, cor, 1) for o in range(-esp, esp + 1)]
+            self.fx.append(("linha", ax, ay, x1, y1, claro, 1))
+            if p >= 1:
+                self.fx.append(("estrela", dx, dy, random.uniform(4, 8), claro))
+            yield
+
+    def sobre_alvo(self, d, gerar, dur=0.6, passo=0.05):
+        """Partículas aleatórias em volta do alvo (gerar(x, y) devolve a lista de efeitos)."""
+        dx, dy = self.centro(d)
+        ini = self.t
+        while self.t - ini < dur:
+            self.fx = gerar(dx, dy, (self.t - ini) / dur)
+            yield from self.esperar(passo)
+
+    def impacto(self, x, y, cor=0xFFFFFF):
+        ini = self.t
+        while self.t - ini < 0.2:
+            p = (self.t - ini) / 0.2
+            self.fx = [("estrela", x, y, 4 + p * 8, cor), ("estrela", x, y, 2 + p * 4, 0xF8F090)]
+            yield
+
+    def investida(self, a, passo=0.05):
+        sent = 1 if a == "j" else -1
+        for k in (5, 12, 18, 8, 0):
+            self.off[a][0] = k * sent
+            self.off[a][1] = -k // 4 * sent
+            yield from self.esperar(passo)
+        self.off[a] = [0, 0]
+
+    def anim(self, a, d, estilo):
+        dx, dy = self.centro(d)
+        ax, ay = self.centro(a)
+        R = random.uniform
+        if estilo in ("investida", "rapido"):
+            yield from self.investida(a, 0.03 if estilo == "rapido" else 0.05)
+            yield from self.impacto(dx, dy)
+        elif estilo == "arranhao":
+            riscos = []
+            for k in range(3):
+                riscos.append(("linha", dx - 12 + k * 8, dy - 14, dx - 2 + k * 8, dy + 12, 0xFFFFFF, 1))
+                self.fx = list(riscos)
+                yield from self.esperar(0.08)
+            yield from self.esperar(0.2)
+        elif estilo == "mordida":
+            ini = self.t
+            while self.t - ini < 0.35:
+                p = min(1.0, (self.t - ini) / 0.2)
+                abre = 16 * (1 - p)
+                self.fx = [("tri", dx - 12, dy - 6 - abre, dx + 12, dy - 6 - abre, dx, dy - abre + 2, 0xFFFFFF),
+                           ("tri", dx - 12, dy + 6 + abre, dx + 12, dy + 6 + abre, dx, dy + abre - 2, 0xFFFFFF)]
+                yield
+            yield from self.impacto(dx, dy)
+        elif estilo in ("golpes", "bicada"):
+            for _ in range(3 if estilo == "golpes" else 4):
+                yield from self.impacto(dx + R(-14, 14), dy + R(-14, 12))
+        elif estilo in ("soco_fogo", "soco_raio", "soco_gelo"):
+            cor = {"soco_fogo": 0xF87820, "soco_raio": 0xF8E030, "soco_gelo": 0x98E0F8}[estilo]
+            yield from self.impacto(dx, dy, cor)
+            yield from self.sobre_alvo(d, lambda x, y, p: [("disco", x + R(-14, 14), y + R(-12, 16), R(1.5, 3.5), cor)
+                                                            for _ in range(10)], 0.45)
+        elif estilo == "brasas":
+            yield from self.projeteis(a, d, (0xF86818, 0xF8D048, 0xF89020), 3.2)
+            yield from self.sobre_alvo(d, lambda x, y, p: [("disco", x + R(-14, 14), y + R(-6, 18), R(1.5, 4),
+                                                             random.choice((0xF85818, 0xF89020, 0xF8D048))) for _ in range(12)], 0.5)
+        elif estilo == "lanca_chamas":
+            yield from self.jato(a, d, 0xF87020, 0xF8E070, dur=0.9, arco=4, r=3.2)
+        elif estilo == "redemoinho":
+            yield from self.sobre_alvo(d, lambda x, y, p: [("disco", x + math.cos(p * 18 + k) * 18, y + math.sin(p * 18 + k) * 10 - k * 3,
+                                                             3, (0xF85818, 0xF8B030)[k % 2]) for k in range(8)], 0.9, 0.03)
+        elif estilo == "bolhas":
+            bolhas = [(R(0, 0.4), R(-8, 8), R(2, 3.5)) for _ in range(8)]
+            ini = self.t
+            while self.t - ini < 1.1:
+                self.fx = []
+                for t0, desvio, r in bolhas:
+                    q = (self.t - ini - t0) / 0.6
+                    if 0 <= q <= 1:
+                        x = ax + (dx - ax) * q
+                        y = ay + (dy - ay) * q + desvio + math.sin(q * 12) * 3
+                        self.fx += [("anel", x, y, r, 0x68B0F8), ("disco", x - r * 0.4, y - r * 0.4, 0.9, 0xFFFFFF)]
+                yield
+        elif estilo == "jato":
+            yield from self.jato(a, d, 0x4898F0, 0xD8F0FF)
+        elif estilo == "onda":
+            ini = self.t
+            while self.t - ini < 0.9:
+                p = (self.t - ini) / 0.9
+                frente = -40 + p * 320
+                self.fx = [("coluna", frente - k, 0x3880E0 if k > 3 else 0xD8F0FF, 40 + math.sin(k * 0.4) * 6)
+                           for k in range(0, 40, 1)]
+                yield
+        elif estilo in ("raio", "trovao"):
+            ini = self.t
+            while self.t - ini < 0.8:
+                self.fx = []
+                for _ in range(1 if estilo == "trovao" else 3):
+                    x, y = dx + R(-14, 14), (-4 if estilo == "trovao" else dy - 34)
+                    while y < dy + 10:
+                        nx, ny = x + R(-6, 6), y + R(4, 7)
+                        self.fx += [("linha", x, y, nx, ny, 0xF8E030, 1), ("linha", x, y, nx, ny, 0xFFFFFF, 0)]
+                        x, y = nx, ny
+                self.flash = 0.5 if int((self.t - ini) * 10) % 3 == 0 else 0.0
+                yield from self.esperar(0.06)
+            self.flash = 0.0
+        elif estilo == "chicote":
+            for lado_ in (1, -1):
+                ini = self.t
+                while self.t - ini < 0.22:
+                    p = (self.t - ini) / 0.22
+                    pts = [(dx - 20 * lado_ + 40 * lado_ * u, dy - 18 + 26 * u + math.sin(u * 3 + p * 4) * 8)
+                           for u in (k / 12 for k in range(int(p * 12) + 1))]
+                    self.fx = [("linha", pts[k][0], pts[k][1] + dd, pts[k + 1][0], pts[k + 1][1] + dd, cc, 1)
+                               for dd, cc in ((1, 0x2E6E22), (0, 0x58C040)) for k in range(len(pts) - 1)]
+                    yield
+            yield from self.esperar(0.1)
+        elif estilo == "dreno":
+            orbs = [(R(0, 0.4), R(-10, 10)) for _ in range(8)]
+            ini = self.t
+            while self.t - ini < 1.0:
+                self.fx = []
+                for t0, desvio in orbs:
+                    q = (self.t - ini - t0) / 0.55
+                    if 0 <= q <= 1:
+                        x = dx + (ax - dx) * q
+                        y = dy + (ay - dy) * q + desvio * math.sin(q * math.pi)
+                        self.fx += [("disco", x, y, 2.4, 0x78E058), ("disco", x - 0.6, y - 0.6, 1, 0xE0FFD0)]
+                yield
+        elif estilo == "folhas":
+            folhas = [(R(0, 0.4), R(-10, 10)) for _ in range(7)]
+            ini = self.t
+            while self.t - ini < 1.0:
+                self.fx = []
+                for t0, desvio in folhas:
+                    q = (self.t - ini - t0) / 0.5
+                    if 0 <= q <= 1:
+                        x = ax + (dx - ax) * q
+                        y = ay + (dy - ay) * q + desvio
+                        g = self.t * 12 + t0 * 30
+                        self.fx.append(("linha", x - math.cos(g) * 3, y - math.sin(g) * 2, x + math.cos(g) * 3, y + math.sin(g) * 2, 0x58C040, 1))
+                yield
+        elif estilo == "solar":
+            yield from self.sobre_alvo(a, lambda x, y, p: [("anel", x, y, 26 * (1 - p) + 2, 0xF8F078)], 0.6, 0.03)
+            yield from self.feixe(a, d, 0xF8E048, 0xFFFFF0, 0.7, 3)
+        elif estilo == "neve":
+            flocos = [(R(-20, 20), R(0, 0.5)) for _ in range(16)]
+            ini = self.t
+            while self.t - ini < 1.0:
+                self.fx = [("estrela", dx + ox + math.sin(self.t * 5 + ox) * 2, dy - 30 + (self.t - ini - t0) * 70, 1.5, 0xE8F8FF)
+                           for ox, t0 in flocos if self.t - ini > t0]
+                yield
+        elif estilo == "feixe_gelo":
+            yield from self.feixe(a, d, 0x88D8F8, 0xFFFFFF, 0.7, 2)
+            yield from self.sobre_alvo(d, lambda x, y, p: [("estrela", x + R(-14, 14), y + R(-14, 14), R(2, 4), 0xC8F0FF)
+                                                            for _ in range(6)], 0.4)
+        elif estilo == "ferrao":
+            for _ in range(3):
+                ini = self.t
+                while self.t - ini < 0.2:
+                    p = (self.t - ini) / 0.2
+                    x, y = ax + (dx - ax) * p, ay + (dy - ay) * p
+                    ux, uy = (dx - ax) * 0.05, (dy - ay) * 0.05
+                    self.fx = [("linha", x - ux, y - uy, x + ux, y + uy, 0xE8E8E8, 0)]
+                    yield
+                yield from self.impacto(dx + R(-6, 6), dy + R(-6, 6), 0xE0A0F0)
+        elif estilo == "acido":
+            yield from self.projeteis(a, d, (0xA048C8, 0xE0A8F0, 0x783098), 3, n=3, arco=16)
+            yield from self.sobre_alvo(d, lambda x, y, p: [("disco", x + R(-14, 14), y + R(-10, 16), R(1.5, 3), 0xA048C8)
+                                                            for _ in range(8)], 0.4)
+        elif estilo == "fumaca":
+            nuvens = [(R(-16, 16), R(-12, 12), R(0, 0.3)) for _ in range(10)]
+            ini = self.t
+            while self.t - ini < 0.9:
+                self.fx = [("disco", dx + ox, dy + oy, 2 + clamp((self.t - ini - t0) / 0.5) * 5, 0x8850A0)
+                           for ox, oy, t0 in nuvens if self.t - ini > t0]
+                yield
+        elif estilo == "lama":
+            yield from self.projeteis(a, d, (0x805830, 0xA88050, 0x604020), 3, n=3, arco=18)
+        elif estilo == "tremor":
+            ini = self.t
+            while self.t - ini < 0.9:
+                self.tremor = random.choice((-3, -2, 2, 3))
+                self.fx = [("disco", dx + R(-24, 24), dy + 26 + R(-3, 3), R(1.5, 3), 0xA88858) for _ in range(8)]
+                yield from self.esperar(0.04)
+            self.tremor = 0
+        elif estilo == "vento":
+            yield from self.sobre_alvo(d, lambda x, y, p: [("anel", x + math.cos(p * 14 + k * 2) * 6, y - 10 + k * 6, 6 + k * 2, 0xF0F0F0, 1)
+                                                            for k in range(4)], 0.8, 0.04)
+        elif estilo == "psiquico":
+            ini = self.t
+            while self.t - ini < 0.9:
+                p = ((self.t - ini) * 2.5) % 1
+                self.fx = [("anel", dx, dy, 4 + p * 26, 0xF070C8), ("anel", dx, dy, 4 + ((p + 0.5) % 1) * 26, 0xC050F0)]
+                self.off[d][0] = int(math.sin((self.t - ini) * 40) * 2)
+                self.tinta[d] = (0xF070C8, 0.35)
+                yield
+            self.off[d][0] = 0
+            self.tinta[d] = None
+        elif estilo == "pedras":
+            pedras = [(R(-18, 18), R(0, 0.4), R(3, 5)) for _ in range(5)]
+            ini = self.t
+            while self.t - ini < 0.9:
+                self.fx = []
+                for ox, t0, r in pedras:
+                    q = (self.t - ini - t0) / 0.4
+                    if 0 <= q <= 1:
+                        self.fx += [("disco", dx + ox, dy - 40 + q * 44, r, 0x807870), ("disco", dx + ox - 1, dy - 41 + q * 44, r * 0.5, 0xB0A898)]
+                yield
+            yield from self.impacto(dx, dy)
+        elif estilo == "sombra":
+            yield from self.projeteis(a, d, (0x483068, 0x9078C0, 0x302048), 4, n=1, arco=4, dur=0.45)
+            yield from self.sobre_alvo(d, lambda x, y, p: [("anel", x, y, 6 + p * 20, 0x584080)], 0.35, 0.03)
+        elif estilo == "dragao":
+            yield from self.jato(a, d, 0x7048E0, 0xC0A0F8, dur=0.8, arco=6, r=3)
+        self.fx = []
+        self.off[a] = [0, 0]
+
+    def anim_status(self, a, d, nome, efeito):
+        dx, dy = self.centro(d)
+        ax, ay = self.centro(a)
+        sent = 1 if a == "j" else -1
+        R = random.uniform
+        if nome in ("GROWL", "SUPERSONIC"):
+            cor = 0x404040 if nome == "GROWL" else 0xF8E030
+            ini = self.t
+            while self.t - ini < 0.7:
+                p = ((self.t - ini) * 3) % 1
+                self.fx = [("arco", ax + sent * 8, ay - 6, 4 + p * 18, sent, cor), ("arco", ax + sent * 8, ay - 6, 4 + ((p + 0.5) % 1) * 18, sent, cor)]
+                yield
+        elif nome == "TAIL WHIP":
+            ini = self.t
+            while self.t - ini < 0.6:
+                self.off[a][0] = 4 if int((self.t - ini) * 12) % 2 else -4
+                yield
+        elif nome in ("DEFENSE CURL", "HARDEN", "AGILITY"):
+            yield from self.sobre_alvo(a, lambda x, y, p: [("anel", x, y, 30 * (1 - p) + 2, 0xF8F8F8)], 0.5, 0.03)
+        elif nome in ("LEER", "SAND-ATTACK", "STRING SHOT"):
+            cor = {"LEER": 0xF83030, "SAND-ATTACK": 0xC8A870, "STRING SHOT": 0xF0F0F0}[nome]
+            yield from self.projeteis(a, d, (cor, cor, cor), 1.6, n=4, arco=6, dur=0.18, rastro=False)
+        elif efeito == "par":
+            yield from self.sobre_alvo(d, lambda x, y, p: [("anel", x, y, 3 + ((p * 3) % 1) * 22, 0xF8E030)], 0.8, 0.03)
+        elif efeito in ("sono", "veneno"):
+            cor = 0xF098C8 if efeito == "sono" else 0xA048C8
+            yield from self.sobre_alvo(d, lambda x, y, p: [("disco", x + R(-18, 18), y - 30 + p * 40 + R(-4, 4), 1.4, cor)
+                                                            for _ in range(14)], 0.8, 0.05)
+        elif efeito == "semente":
+            for n in range(2):
+                ini = self.t
+                while self.t - ini < 0.4:
+                    p = (self.t - ini) / 0.4
+                    x = ax + (dx - ax) * p + n * 6
+                    y = ay + (dy - ay) * p - math.sin(p * math.pi) * 20
+                    self.fx = [("disco", x, y, 2, 0x906830), ("disco", x - 0.5, y - 0.5, 0.8, 0xC8A060)]
+                    yield
+        elif efeito == "conf":
+            yield from self.sobre_alvo(d, lambda x, y, p: [("disco", x + math.cos(p * 20 + k * 2.1) * 16, y - 24 + math.sin(p * 20 + k * 2.1) * 4,
+                                                             1.8, 0xF8E030) for k in range(3)], 0.8, 0.03)
+        self.fx = []
+        self.off[a] = [0, 0]
+
+    # --- desenho (em coordenadas do GBA, 240x160)
+
+    def ponto(self, x, y, c):
+        x, y = int(x) + self.ox, int(y) + self.oy
+        if 0 <= x < self.vw and 0 <= y < self.vh:
+            self.px[y * self.vw + x] = c
+
+    def ret(self, x0, y0, x1, y1, c):
+        vw, px = self.vw, self.px
+        x0, x1 = max(0, int(x0) + self.ox), min(vw, int(x1) + self.ox)
+        if x1 <= x0:
+            return
+        linha = [c] * (x1 - x0)
+        for y in range(max(0, int(y0) + self.oy), min(self.vh, int(y1) + self.oy)):
+            px[y * vw + x0:y * vw + x1] = linha
+
+    def disco(self, x, y, r, c):
+        for yy in range(int(y - r), int(y + r) + 1):
+            for xx in range(int(x - r), int(x + r) + 1):
+                if (xx + 0.5 - x) ** 2 + (yy + 0.5 - y) ** 2 <= r * r:
+                    self.ponto(xx, yy, c)
+
+    def anel(self, x, y, r, c, sentido=0):
+        for yy in range(int(y - r) - 1, int(y + r) + 2):
+            for xx in range(int(x - r) - 1, int(x + r) + 2):
+                if sentido and (xx - x) * sentido < 0:
+                    continue
+                if abs(math.hypot(xx + 0.5 - x, yy + 0.5 - y) - r) < 0.7:
+                    self.ponto(xx, yy, c)
+
+    def linha(self, x0, y0, x1, y1, c, esp=0):
+        n = int(max(abs(x1 - x0), abs(y1 - y0))) + 1
+        for k in range(n + 1):
+            x, y = x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n
+            self.ponto(x, y, c)
+            if esp:
+                self.ponto(x + 1, y, c)
+                self.ponto(x, y + 1, c)
+
+    def estrela(self, x, y, r, c):
+        self.linha(x - r, y, x + r, y, c)
+        self.linha(x, y - r, x, y + r, c)
+        d = r * 0.5
+        self.linha(x - d, y - d, x + d, y + d, c)
+        self.linha(x - d, y + d, x + d, y - d, c)
+
+    def tri(self, x0, y0, x1, y1, x2, y2, c):
+        for yy in range(int(min(y0, y1, y2)), int(max(y0, y1, y2)) + 1):
+            for xx in range(int(min(x0, x1, x2)), int(max(x0, x1, x2)) + 1):
+                px_, py_ = xx + 0.5, yy + 0.5
+                d1 = (px_ - x1) * (y0 - y1) - (x0 - x1) * (py_ - y1)
+                d2 = (px_ - x2) * (y1 - y2) - (x1 - x2) * (py_ - y2)
+                d3 = (px_ - x0) * (y2 - y0) - (x2 - x0) * (py_ - y0)
+                if not ((d1 < 0 or d2 < 0 or d3 < 0) and (d1 > 0 or d2 > 0 or d3 > 0)):
+                    self.ponto(xx, yy, c)
+
+    def caixa_px(self, x0, y0, x1, y1, fill, borda, borda2=None, sombra=None):
+        if sombra:
+            self.ret(x0 + 1, y0 + 1, x1 + 1, y1 + 1, sombra)
+        self.ret(x0 + 1, y0, x1 - 1, y1, borda)
+        self.ret(x0, y0 + 1, x1, y1 - 1, borda)
+        if borda2:
+            self.ret(x0 + 2, y0 + 1, x1 - 2, y1 - 1, borda2)
+            self.ret(x0 + 1, y0 + 2, x1 - 1, y1 - 2, borda2)
+            self.ret(x0 + 3, y0 + 2, x1 - 3, y1 - 2, fill)
+            self.ret(x0 + 2, y0 + 3, x1 - 2, y1 - 3, fill)
+        else:
+            self.ret(x0 + 1, y0 + 1, x1 - 1, y1 - 1, fill)
+
+    def escrever_px(self, x, y, s, cor, sombra=None):
+        for passo, c, dx in ((0, sombra, 1), (1, cor, 0)):
+            if c is None:
+                continue
+            xx = x
+            for letra in s:
+                if letra == " ":
+                    xx += 3
+                    continue
+                g = FONTE_GBA.get(letra) or FONTE_GBA["?"]
+                for ry, row in enumerate(g):
+                    for rx, p in enumerate(row):
+                        if p == "#":
+                            self.ponto(xx + rx + dx, y + ry + dx, c)
+                            if dx:
+                                self.ponto(xx + rx + 1, y + ry, c)
+                                self.ponto(xx + rx, y + ry + 1, c)
+                xx += len(g[0]) + 1
+
+    def mini_hp(self, x, y, txt="HP", cor=0xF8B800, sombra=None):
+        for k, letra in enumerate(txt):
+            for ry, row in enumerate(MINI_HP[letra]):
+                for rx, p in enumerate(row):
+                    if p == "#":
+                        if sombra:
+                            self.ponto(x + k * 4 + rx + 1, y + ry + 1, sombra)
+                        self.ponto(x + k * 4 + rx, y + ry, cor)
+
+    def nivel(self, x_fim, y, n):
+        num = str(n)
+        x = x_fim - largura_gba(num) - 8
+        self.mini_hp(x, y + 2, "Lv", self.TEXTO, self.TEXTO_SOMBRA)
+        self.escrever_px(x + 8, y, num, self.TEXTO, self.TEXTO_SOMBRA)
+
+    def desenhar_sprite(self, lado):
+        if not self.vis[lado] or self.pisca[lado]:
+            return
+        grade = self.lut[lado]["spr"]
+        H, W = len(grade), len(grade[0])
+        x0, y0 = self.pos(lado)
+        if lado == "j" and self.balanco:
+            y0 += 1 if int(self.t * 4) % 2 else 0
+        f, br, tinta, af = self.escala_spr[lado], self.branco[lado], self.tinta[lado], self.afunda[lado]
+        lim = min(y0 + self.lut[lado]["caixa"][3] + 1 if af else 112, 112)
+        if f < 0.999:
+            sw, sh = max(1, int(W * f)), max(1, int(H * f))
+            ox, oy = x0 + (W - sw) // 2, y0 + H - sh
+            for yy in range(sh):
+                if oy + yy >= lim:
+                    continue
+                linha_ = grade[min(H - 1, int(yy / f))]
+                for xx in range(sw):
+                    c = linha_[min(W - 1, int(xx / f))]
+                    if c:
+                        self.ponto(ox + xx, oy + yy, misturar(c, 0xFFFFFF, br) if br else c)
+            return
+        for yy in range(H):
+            Y = y0 + yy + af
+            if Y >= lim:
+                continue
+            linha_ = grade[yy]
+            for xx in range(W):
+                c = linha_[xx]
+                if c:
+                    if br:
+                        c = misturar(c, 0xFFFFFF, br)
+                    elif tinta:
+                        c = misturar(c, tinta[0], tinta[1])
+                    self.ponto(x0 + xx, Y, c)
+
+    def cor_hp(self, r):
+        return self.HP_CORES[0 if r > 0.5 else 1 if r > 0.2 else 2]
+
+    def barra_hp(self, x, y, r):
+        self.ret(x - 16, y - 2, x + 50, y + 5, self.PAINEL_BORDA)
+        self.ret(x - 15, y - 1, x + 49, y + 4, self.BARRA_FUNDO)
+        self.mini_hp(x - 13, y - 1)
+        self.ret(x, y, x + 48, y + 3, 0x303838)
+        n = int(round(48 * clamp(r)))
+        if r > 0 and n == 0:
+            n = 1
+        claro, base = self.cor_hp(r)
+        self.ret(x, y, x + n, y + 1, claro)
+        self.ret(x, y + 1, x + n, y + 3, base)
+
+    def painel_inimigo(self):
+        e = self.lut["i"]
+        x = 13 + self.painel_off["i"]
+        self.caixa_px(x, 16, x + 100, 45, self.PAINEL, self.PAINEL_BORDA, sombra=self.PAINEL_SOMBRA)
+        self.escrever_px(x + 8, 20, e["nome"], self.TEXTO, self.TEXTO_SOMBRA)
+        if e["genero"]:
+            self.escrever_px(x + 9 + largura_gba(e["nome"]), 20, e["genero"], 0x3890F8 if e["genero"] == "♂" else 0xF86060, self.TEXTO_SOMBRA)
+        self.nivel(x + 94, 20, e["nivel"])
+        self.barra_hp(x + 43, 33, self.hpv["i"] / e["max"])
+        if e["status"]:
+            self.etiqueta_status(x + 8, 32, e["status"])
+
+    def painel_jogador(self):
+        j = self.lut["j"]
+        x = 126 + self.painel_off["j"]
+        self.caixa_px(x, 74, x + 104, 111, self.PAINEL, self.PAINEL_BORDA, sombra=self.PAINEL_SOMBRA)
+        self.escrever_px(x + 10, 78, j["nome"], self.TEXTO, self.TEXTO_SOMBRA)
+        if j["genero"]:
+            self.escrever_px(x + 11 + largura_gba(j["nome"]), 78, j["genero"], 0x3890F8 if j["genero"] == "♂" else 0xF86060, self.TEXTO_SOMBRA)
+        self.nivel(x + 98, 78, j["nivel"])
+        self.barra_hp(x + 48, 90, self.hpv["j"] / j["max"])
+        hp = f"{math.ceil(self.hpv['j'])}/ {j['max']}"
+        self.escrever_px(x + 98 - largura_gba(hp), 97, hp, self.TEXTO, self.TEXTO_SOMBRA)
+        self.ret(x + 30, 106, x + 98, 109, self.PAINEL_BORDA)
+        self.ret(x + 31, 107, x + 97, 108, 0x505858)
+        self.ret(x + 31, 107, x + 31 + int(66 * self.expv), 108, 0x40C8F8)
+        if j["status"]:
+            self.etiqueta_status(x + 10, 90, j["status"])
+
+    def etiqueta_status(self, x, y, st):
+        txt, cor = {"par": ("PAR", 0xC8A800), "sono": ("SLP", 0x8888A0), "veneno": ("PSN", 0xA048C8)}[st]
+        self.ret(x, y, x + 21, y + 9, cor)
+        self.escrever_px(x + 2, y + 1, txt, 0xF8F8F8)
+
+    def caixa_texto(self):
+        self.caixa_px(0, 112, 240, 160, self.CAIXA, self.CAIXA_BORDA2, borda2=self.CAIXA_BORDA)
+        if self.menu and self.menu[0] == "golpes":
+            J = self.lut["j"]
+            sel = self.menu[1]
+            self.caixa_px(0, 112, 162, 160, self.MENU, self.MENU_BORDA, borda2=self.MENU_BORDA2)
+            self.caixa_px(160, 112, 240, 160, self.MENU, self.MENU_BORDA, borda2=self.MENU_BORDA2)
+            for k, (x, y) in enumerate(((12, 122), (92, 122), (12, 140), (92, 140))):
+                if k < len(J["golpes"]):
+                    self.escrever_px(x, y, J["golpes"][k][0], self.MENU_TEXTO, self.MENU_SOMBRA)
+                    if k == sel:
+                        self.escrever_px(x - 7, y, "▶", self.MENU_TEXTO)
+            g = J["golpes"][sel]
+            self.escrever_px(168, 118, "PP", self.MENU_TEXTO, self.MENU_SOMBRA)
+            pp = f"{J['pp'][sel]}/{g[2]}"
+            self.escrever_px(232 - largura_gba(pp), 118, pp, self.MENU_TEXTO, self.MENU_SOMBRA)
+            self.escrever_px(168, 131, "TYPE/", self.MENU_TEXTO, self.MENU_SOMBRA)
+            tp = self.tipo_golpe(g)
+            self.escrever_px(232 - largura_gba(tp), 143, tp, self.MENU_TEXTO, self.MENU_SOMBRA)
+            return
+        self.escrever_px(11, 122, self.texto[0], 0xF8F8F8, 0x687080)
+        self.escrever_px(11, 140, self.texto[1], 0xF8F8F8, 0x687080)
+        if self.menu and self.menu[0] == "cmd":
+            sel = self.menu[1]
+            self.caixa_px(120, 112, 240, 160, self.MENU, self.MENU_BORDA, borda2=self.MENU_BORDA2)
+            for k, (s, x, y) in enumerate((("FIGHT", 138, 122), ("BAG", 194, 122), ("POKéMON", 138, 140), ("RUN", 194, 140))):
+                self.escrever_px(x, y, s, self.MENU_TEXTO, self.MENU_SOMBRA)
+                if k == sel:
+                    self.escrever_px(x - 8, y, "▶", self.MENU_TEXTO)
+        elif self.seta and int(self.t * 3) % 2 == 0:
+            self.escrever_px(222, 146, "▼", 0xF85050)
+
+    def draw(self, t, dt, ch, co):
+        self.t, self.dt = t, dt
+        next(self.gen)
+        px = self.px
+        px[:] = self.fundo
+        for lado in ("i", "j"):
+            ox = self.plat_off[0 if lado == "i" else 1]
+            for x, y, c in self.plat[lado]:
+                if y < 112:
+                    self.ponto(x + ox, y, c)
+        if self.lut:
+            self.desenhar_sprite("i")
+            self.desenhar_sprite("j")
+        for f in self.fx:
+            tipo = f[0]
+            if tipo == "disco":
+                self.disco(*f[1:])
+            elif tipo == "anel":
+                self.anel(*f[1:])
+            elif tipo == "arco":
+                self.anel(f[1], f[2], f[3], f[5], sentido=f[4])
+            elif tipo == "linha":
+                self.linha(*f[1:])
+            elif tipo == "estrela":
+                self.estrela(*f[1:])
+            elif tipo == "tri":
+                self.tri(*f[1:])
+            elif tipo == "coluna":
+                x, c, alt = f[1], f[2], f[3]
+                self.ret(x, 112 - alt, x + 1, 112, c)
+        if self.bola:
+            bx, by = self.bola
+            for yy in range(int(by) - 6, int(by) + 7):
+                for xx in range(int(bx) - 6, int(bx) + 7):
+                    d = math.hypot(xx + 0.5 - bx, yy + 0.5 - by)
+                    if d <= 5.5:
+                        c = 0x303030 if d > 4.6 or abs(yy + 0.5 - by) < 0.8 else 0xF83838 if yy + 0.5 < by else 0xF8F8F8
+                        if d < 1.8:
+                            c = 0xF8F8F8 if d < 1.1 else 0x303030
+                        self.ponto(xx, yy, c)
+        if self.lut and self.info["i"]:
+            self.painel_inimigo()
+        if self.lut and self.info["j"]:
+            self.painel_jogador()
+        self.caixa_texto()
+        if self.cortina > 0:
+            n = int(self.cortina * self.vw)
+            for y in range(0, self.vh, 4):
+                a0, a1 = (0, n) if (y // 4) % 2 == 0 else (self.vw - n, self.vw)
+                for yy in range(y, min(self.vh, y + 4)):
+                    px[yy * self.vw + a0:yy * self.vw + a1] = [0x000000] * (a1 - a0)
+        if self.flash > 0:
+            px[:] = [misturar(c, 0xFFFFFF, self.flash) for c in px]
+        if self.escuro > 0:
+            px[:] = [misturar(c, self.cor_fade, self.escuro) for c in px]
+        pixels_para_celulas_k(px, self.vw, self.k, self.w, self.h, ch, co,
+                              self.tremor * self.k)
+
+
+CLAWD = ["...############...",
+         "...##.######.##...",
+         ".################.",
+         "...############...",
+         "....#.#....#.#...."]
+CLAWD_PASSO = ".....#.#....#.#..."
+MINI_CLAWD = [" ▐▛███▜▌ ", "▝▜█████▛▘", "  ▘▘ ▝▝  "]
+MINI_PASSO = "  ▝▝ ▘▘  "
+BUG = ["..#...#..",
+       "...#.#...",
+       ".##ooo##.",
+       "#o##o##o#",
+       ".#######.",
+       "#.#.#.#.#"]
+BUG_PASSO = ".#.#.#.#."
+
+
+def blit(ch, co, w, h, pixels):
+    """Desenha pixels soltos {(x, py): cor} por cima das células, em meios-blocos."""
+    celulas = {}
+    for (x, py), c in pixels.items():
+        if 0 <= x < w and 0 <= py < 2 * h:
+            celulas.setdefault((x, py >> 1), [0, 0])[py & 1] = c
+    for (x, row), (a, b) in celulas.items():
+        i = row * w + x
+        if a and b:
+            ch[i], co[i] = ("█", a) if a == b else ("▀", a | (b << 24) | BG)
+        elif a:
+            ch[i], co[i] = "▀", a
+        else:
+            ch[i], co[i] = "▄", b
+
+
+def arte_pixels(arte, x0, y0, esc, cores, px=None):
+    """Arte (lista de strings) -> {(x, py): cor}; cores mapeia caractere -> cor."""
+    px = {} if px is None else px
+    for ay, linha in enumerate(arte):
+        for ax, s in enumerate(linha):
+            c = cores.get(s)
+            if c:
+                traco = y0 + ay * esc + esc - 1 - esc // 3
+                for yy in range(y0 + ay * esc, y0 + ay * esc + esc):
+                    cc = c if s != "e" or esc == 1 or yy == traco else cores.get("#", c)
+                    for xx in range(x0 + ax * esc, x0 + ax * esc + esc):
+                        px[(xx, yy)] = cc
+    return px
+
+
+class Clawd(Cena):
+    """O Clawd (mascote do Claude Code) caçando bugs no meio do código."""
+    combinavel = False
+    peso = 0.7
+    duracao = (45, 60)
+    LARANJA = 0xD97757
+    SPIN = "·✢✳✶✻✽✻✶✳✢"
+    VERBOS = ["Clauding", "Pondering", "Osmosing", "Churning", "Noodling", "Percolating", "Cogitating",
+              "Vibing", "Brewing", "Conjuring", "Moseying", "Spelunking", "Wrangling", "Finagling",
+              "Schlepping", "Honking", "Marinating", "Simmering", "Debugging", "Bug-hunting", "Refactoring"]
+    FALAS_PEGOU = ["You're absolutely right!", "You're absolutely right!", "Achei o bug!", "Corrigido ✓",
+                   "Mais um!", "Era um off-by-one.", "Faltava um await.", "Era só um typo.", "null de novo...",
+                   "Quem escreveu isso? Ah, fui eu.", "Nada que um print não resolva.", "Race condition. Clássico."]
+    FALAS_ERROU = ["Quase!", "Volta aqui!", "Hmm, escorregou.", "Deixa eu reler o stack trace..."]
+    FALAS_IDEIA = ["Já sei!", "Hmm... achei.", "Eureka!", "Ok, tenho um plano.", "Deixa comigo."]
+    CORES_BUG = [0xFF5C5C, 0x7CFC7C, 0xB07CFF, 0xFFC857, 0x5CC8FF]
+    NOMES = ["parse", "fetch_user", "render", "retry", "cache", "handler", "tokens", "payload", "config",
+             "session", "queue", "buffer", "index", "result", "item", "node", "user", "data", "resp", "cb"]
+    MOLDES = ["def {a}({b}, {c}):", "    if {b} is None:", "        return {c}", "    for {i} in range(len({b})):",
+              "        {b}[{i}] = {a}({c})", "const {b} = await {a}({c});", "if (!{b}) throw new Error('{a}');",
+              "    {b} += 1", "}}", "import {a}", "fn {a}(&mut self) -> Result<(), Error> {{",
+              "    let {b} = {c}.clone();", "// TODO: {a} quebra quando {b} vem vazio", "# FIXME: {a} está lento",
+              "    try:", "    except KeyError as e:", "        log.warning(e)", "{b}.map(({i}) => {a}({i}))",
+              "    while not {b}.empty():", "return {{ ...{b}, {c} }};", "    {b} = {a}({c}) or {{}}",
+              "@retry(times=3)", "class {A}:", "    assert {b} == {c}"]
+
+    def iniciar(self):
+        w, h = self.w, self.h
+        self.esc = 3 if w >= 110 and h >= 36 else 2
+        self.cw = 18 * self.esc
+        self.chao = h - 3
+        self.mini_rola = rola_pixels(0.12)
+        self.x = random.uniform(0, max(1, w - self.cw))
+        self.dir = 1
+        self.pulo_px = 0.0
+        self.andando = False
+        self.t = self.dt = 0.0
+        self.bugs, self.parts, self.flutua, self.minis = [], [], [], []
+        self.fala, self.fala_t = "", -10.0
+        self.pensando = None
+        self.corrigidos = 0
+        self.testes = random.randint(30, 55)
+        self.verbo, self.prox_verbo = random.choice(self.VERBOS), random.uniform(5, 9)
+        self.codigo = [self.linha_codigo() for _ in range(max(1, h - 8))]
+        self.acc_cod = 0.0
+        self.destaque = {}
+        self.prox_mini = random.uniform(2, 6)
+        for _ in range(random.randint(3, 5)):
+            self.novo_bug(dentro=True)
+        self.gen = self.comportamento()
+
+    def linha_codigo(self):
+        nomes = random.sample(self.NOMES, 3)
+        txt = random.choice(self.MOLDES).format(a=nomes[0], b=nomes[1], c=nomes[2], i=random.choice("ijk"),
+                                                A=nomes[0].title().replace("_", ""))
+        return txt, (0x3E5E3E if txt.lstrip().startswith(("#", "//")) else 0x3A3A3A)
+
+    def novo_bug(self, dentro=False):
+        voa = random.random() < 0.3
+        v = random.uniform(4, 9) * random.choice((-1, 1))
+        if dentro:
+            x = random.uniform(0, self.w - 9)
+        else:
+            x = -9.0 if v > 0 else float(self.w)
+        self.bugs.append({"x": x, "v": v, "voa": voa, "alt": random.uniform(5, 10) if voa else 0.0,
+                          "cor": random.choice(self.CORES_BUG), "fase": random.uniform(0, 6),
+                          "vira": random.uniform(1, 4), "rola": random.random() < (0.5 if OVOS else 0.06)})
+
+    def falar(self, txt):
+        self.fala, self.fala_t = txt, self.t
+
+    # --- comportamento do Clawd (gerador: cada yield é um quadro)
+
+    def comportamento(self):
+        while True:
+            if random.random() < 0.22:
+                yield from self.pensar()
+            if not self.bugs:
+                yield from self.esperar(0.4)
+                continue
+            meio = self.x + self.cw / 2
+            alvo = min(self.bugs, key=lambda b: abs(b["x"] + 4.5 - meio) + random.uniform(0, 25))
+            ini = self.t
+            while alvo in self.bugs and self.t - ini < 6:
+                d = (alvo["x"] + 4.5) - (self.x + self.cw / 2)
+                self.dir = 1 if d > 0 else -1
+                if abs(d) < self.cw * 0.45 + 6:
+                    break
+                self.x = max(0.0, min(self.w - self.cw, self.x + self.dir * 15 * self.dt))
+                self.andando = True
+                yield
+            self.andando = False
+            if alvo in self.bugs:
+                yield from self.pular(alvo)
+
+    def pular(self, alvo):
+        x0 = self.x
+        x1 = max(0.0, min(self.w - self.cw, alvo["x"] + 4.5 + alvo["v"] * 0.5 - self.cw / 2))
+        altura = (6 + alvo["alt"]) * 2
+        ini = self.t
+        while self.t - ini < 0.55:
+            p = (self.t - ini) / 0.55
+            self.x = x0 + (x1 - x0) * suave(p)
+            self.pulo_px = math.sin(p * math.pi) * altura
+            yield
+        self.pulo_px, self.x = 0.0, x1
+        meio = self.x + self.cw / 2
+        pegos = [b for b in self.bugs if abs(b["x"] + 4.5 - meio) < self.cw * 0.5 + 2]
+        if pegos:
+            for b in pegos:
+                self.esmagar(b)
+            if self.testes >= 100:
+                yield from self.festa()
+                return
+            if any(b.get("rola") for b in pegos):
+                self.falar("Isso não é bug, é feature.")
+            elif random.random() < 0.55:
+                self.falar(random.choice(self.FALAS_PEGOU))
+            yield from self.esperar(0.4)
+        else:
+            if random.random() < 0.6:
+                self.falar(random.choice(self.FALAS_ERROU))
+            yield from self.esperar(0.5)
+
+    def esmagar(self, b):
+        self.bugs.remove(b)
+        self.corrigidos += 1
+        self.testes = min(100, self.testes + random.randint(5, 12))
+        bx, by = b["x"] + 4.5, self.chao - 1 - b["alt"]
+        for _ in range(24):
+            a = random.uniform(0, 2 * math.pi)
+            sp = random.uniform(6, 22)
+            self.parts.append([bx, by, math.cos(a) * sp, math.sin(a) * sp * 0.5 - 6, random.choice("✻*+·"),
+                               random.choice((b["cor"], self.LARANJA, 0xFFE0C8)), self.t, random.uniform(0.6, 1.2)])
+        self.flutua.append([bx - 2, by - 2, "+1 ✓", 0x7CFC7C, self.t])
+        if self.codigo:
+            self.destaque[random.randrange(len(self.codigo))] = self.t
+
+    def festa(self):
+        self.falar("Todos os testes passando! ✓")
+        for _ in range(60):
+            self.parts.append([random.uniform(0, self.w), float(self.h), random.uniform(-6, 6), random.uniform(-30, -12),
+                               random.choice("✻✳✶*"), hsv(random.random(), 0.6, 1.0), self.t, random.uniform(1.5, 2.5)])
+        for _ in range(3):
+            ini = self.t
+            while self.t - ini < 0.35:
+                self.pulo_px = math.sin((self.t - ini) / 0.35 * math.pi) * 8
+                yield
+            self.pulo_px = 0.0
+        yield from self.esperar(1.2)
+        self.testes = random.randint(20, 45)
+
+    def pensar(self):
+        self.pensando = (random.choice(self.VERBOS), self.t)
+        yield from self.esperar(random.uniform(2.5, 4.5))
+        self.pensando = None
+        if random.random() < 0.5:
+            self.falar(random.choice(self.FALAS_IDEIA))
+
+    # --- desenho
+
+    def draw(self, t, dt, ch, co):
+        self.t, self.dt = t, dt
+        next(self.gen)
+        w, h = self.w, self.h
+        for b in self.bugs:
+            b["x"] += b["v"] * dt
+            b["vira"] -= dt
+            if b["vira"] <= 0:
+                b["v"] = random.uniform(4, 9) * random.choice((-1, 1))
+                b["vira"] = random.uniform(1, 4)
+            if b["x"] < 0 and b["v"] < 0 or b["x"] > w - 9 and b["v"] > 0:
+                b["v"] = -b["v"]
+        if len(self.bugs) < 3 and random.random() < dt * 1.5 or len(self.bugs) < 6 and random.random() < dt * 0.25:
+            self.novo_bug()
+        if t >= self.prox_verbo:
+            self.verbo, self.prox_verbo = random.choice(self.VERBOS), t + random.uniform(5, 9)
+        self.acc_cod += dt
+        if self.acc_cod > 1.4:
+            self.acc_cod = 0.0
+            self.codigo.pop(0)
+            self.codigo.append(self.linha_codigo())
+            self.destaque = {k - 1: v for k, v in self.destaque.items() if k > 0}
+        ch[:] = self.vazio
+        self.desenhar_codigo(t, ch, co)
+        self.desenhar_hud(t, ch, co)
+        self.desenhar_desfile(t, dt, ch, co)
+        self.desenhar_bugs(t, ch, co)
+        self.desenhar_clawd(t, ch, co)
+        self.desenhar_particulas(t, dt, ch, co)
+        self.desenhar_baloes(t, ch, co)
+        escrever(ch, co, w, h, 0, self.chao + 1, "─" * w, 0x3A3A3A)
+
+    def desenhar_codigo(self, t, ch, co):
+        w, h = self.w, self.h
+        for k, (txt, c) in enumerate(self.codigo):
+            y = 4 + k
+            if y >= self.chao - 10:
+                break
+            t0 = self.destaque.get(k)
+            if t0 is not None and t - t0 < 1.2:
+                escrever(ch, co, w, h, 2, y, "✓ " + txt, misturar(0x5CFF7A, c, (t - t0) / 1.2))
+            else:
+                escrever(ch, co, w, h, 4, y, txt, c)
+
+    def desenhar_hud(self, t, ch, co):
+        w, h = self.w, self.h
+        escrever(ch, co, w, h, 2, 1, "✻", self.LARANJA)
+        escrever(ch, co, w, h, 4, 1, "Claude Code", 0xE6E6E6)
+        escrever(ch, co, w, h, 16, 1, "· caçando bugs", 0x7A7A7A)
+        escrever(ch, co, w, h, 2, 2, f"bugs corrigidos: {self.corrigidos}", 0x9A9A9A)
+        k = self.testes // 5
+        cor_barra = 0x5CFF7A if self.testes >= 100 else self.LARANJA
+        escrever(ch, co, w, h, 24, 2, "testes", 0x9A9A9A)
+        escrever(ch, co, w, h, 31, 2, "█" * k, cor_barra)
+        escrever(ch, co, w, h, 31 + k, 2, "░" * (20 - k), 0x3A3A3A)
+        escrever(ch, co, w, h, 52, 2, f"{self.testes}% passando", 0x9A9A9A)
+        verbo = (self.pensando[0] if self.pensando else self.verbo) + "…"
+        resto = f" ({int(t)}s · ↓ {t * 0.35:.1f}k tokens · esc to interrupt)"
+        x = max(0, w - 4 - len(verbo) - len(resto))
+        escrever(ch, co, w, h, x - 2, 1, self.SPIN[int(t * 8) % len(self.SPIN)], self.LARANJA)
+        for i, s in enumerate(verbo):
+            escrever(ch, co, w, h, x + i, 1, s, misturar(self.LARANJA, 0xFFE0C8, max(0.0, math.sin(i * 0.45 - t * 5)) ** 6))
+        escrever(ch, co, w, h, x + len(verbo), 1, resto, 0x6A6A6A)
+
+    def desenhar_desfile(self, t, dt, ch, co):
+        w, h = self.w, self.h
+        if t >= self.prox_mini:
+            v = random.uniform(5, 10) * random.choice((-1, 1))
+            self.minis.append([-9.0 if v > 0 else float(w), v, random.random() * 2])
+            self.prox_mini = t + random.uniform(4, 9)
+        vivos = []
+        for m in self.minis:
+            m[0] += m[1] * dt
+            if -10 < m[0] < w + 1:
+                vivos.append(m)
+                passo = int(t * 8 + m[2]) % 2
+                for k, l in enumerate(MINI_CLAWD[:2] + [MINI_CLAWD[2] if passo else MINI_PASSO]):
+                    escrever(ch, co, w, h, int(m[0]), self.chao - 2 + k, l, escala(self.LARANJA, 0.4))
+        self.minis = vivos
+
+    def desenhar_bugs(self, t, ch, co):
+        w, h = self.w, self.h
+        for b in self.bugs:
+            passo = int(t * 7 + b["fase"]) % 2
+            arte = BUG[:-1] + [BUG[-1] if passo else BUG_PASSO]
+            alt = b["alt"] + (math.sin(t * 4 + b["fase"]) * 1.2 if b["voa"] else 0)
+            y0 = 2 * (self.chao - int(alt)) + 2 - len(arte)
+            if b.get("rola"):
+                mini, _pw, ph = self.mini_rola
+                blit(ch, co, w, h, {(int(b["x"]) + x, 2 * (self.chao - int(alt)) + 2 - ph + y): c for (x, y), c in mini.items()})
+            else:
+                blit(ch, co, w, h, arte_pixels(arte, int(b["x"]), y0, 1, {"#": b["cor"], "o": escala(b["cor"], 0.45)}))
+            if b["voa"]:
+                escrever(ch, co, w, h, int(b["x"]) + 1, y0 // 2 - 1, "^   ^" if passo else "v   v", 0xCFCFCF)
+
+    def desenhar_clawd(self, t, ch, co):
+        w, h, s = self.w, self.h, self.esc
+        arte = list(CLAWD)
+        olhar = self.dir if (self.andando or self.pulo_px) else 0
+        olhos = list("...############...")
+        if (t % 4.3) >= 0.14:
+            olhos[5 + olhar] = "."
+            olhos[12 + olhar] = "."
+        arte[1] = "".join(olhos)
+        if self.andando and int(t * 9) % 2:
+            arte[4] = CLAWD_PASSO
+        y0 = 2 * self.chao + 2 - 5 * s - int(self.pulo_px)
+        blit(ch, co, w, h, arte_pixels(arte, int(self.x), y0, s, {"#": self.LARANJA}))
+
+    def desenhar_particulas(self, t, dt, ch, co):
+        w, h = self.w, self.h
+        vivas = []
+        for p in self.parts:
+            p[3] += 25 * dt
+            p[0] += p[2] * dt
+            p[1] += p[3] * dt
+            vida = (t - p[6]) / p[7]
+            if vida < 1:
+                vivas.append(p)
+                escrever(ch, co, w, h, int(p[0]), int(p[1]), p[4], escala(p[5], 1 - vida * 0.7))
+        self.parts = vivas
+        vivos = []
+        for f in self.flutua:
+            vida = t - f[4]
+            if vida < 1.2:
+                vivos.append(f)
+                escrever(ch, co, w, h, int(f[0]), int(f[1] - vida * 5), f[2], escala(f[3], 1 - vida * 0.6))
+        self.flutua = vivos
+
+    def caixa(self, ch, co, x1, y1, x2, y2, c):
+        w, h = self.w, self.h
+        escrever(ch, co, w, h, x1, y1, "╭" + "─" * (x2 - x1 - 1) + "╮", c, opaco=True)
+        escrever(ch, co, w, h, x1, y2, "╰" + "─" * (x2 - x1 - 1) + "╯", c, opaco=True)
+        for y in range(y1 + 1, y2):
+            escrever(ch, co, w, h, x1, y, "│" + " " * (x2 - x1 - 1) + "│", c, opaco=True)
+
+    def desenhar_baloes(self, t, ch, co):
+        w, h = self.w, self.h
+        topo = self.chao + 1 - 5 * self.esc // 2 - int(self.pulo_px) // 2
+        meio = int(self.x + self.cw / 2)
+        if self.pensando:
+            verbo, t0 = self.pensando
+            txt = f"{self.SPIN[int(t * 8) % len(self.SPIN)]} {verbo}…"
+            x1 = max(0, min(w - len(txt) - 5, meio - len(txt) // 2 - 2))
+            self.caixa(ch, co, x1, topo - 6, x1 + len(txt) + 3, topo - 4, 0x8A8A8A)
+            escrever(ch, co, w, h, x1 + 2, topo - 5, txt[0], self.LARANJA)
+            for i, s in enumerate(txt[1:]):
+                escrever(ch, co, w, h, x1 + 3 + i, topo - 5, s,
+                         misturar(self.LARANJA, 0xFFE0C8, max(0.0, math.sin(i * 0.45 - t * 5)) ** 6))
+            escrever(ch, co, w, h, meio, topo - 3, "o", 0x8A8A8A)
+            escrever(ch, co, w, h, meio + 1, topo - 2, "°", 0x8A8A8A)
+        elif self.fala and t - self.fala_t < 3.2:
+            n = min(len(self.fala), int((t - self.fala_t) * 30))
+            txt = self.fala
+            x1 = max(0, min(w - len(txt) - 5, meio - len(txt) // 2 - 2))
+            self.caixa(ch, co, x1, topo - 5, x1 + len(txt) + 3, topo - 3, 0x8A8A8A)
+            c = self.LARANJA if txt.startswith("You're") else 0xE6E6E6
+            escrever(ch, co, w, h, x1 + 2, topo - 4, txt[:n], c)
+            escrever(ch, co, w, h, meio, topo - 2, "╲" if meio > x1 + 2 else "╱", 0x8A8A8A)
+
+
+CORES_CLAWD = {"#": 0xD97757, "e": 0x6B3426}
+
+
+def arte_clawd(olhar=0, fechados=False, passo=False, agachado=False):
+    arte = list(CLAWD)
+    olhos = list("...############...")
+    olhos[5 + olhar] = olhos[12 + olhar] = "e" if fechados else "."
+    arte[1] = "".join(olhos)
+    if passo:
+        arte[4] = CLAWD_PASSO
+    return arte[:4] if agachado else arte
+
+
+def balao(ch, co, w, h, meio, base, txt, n=None, c=0xE6E6E6, borda=0x8A8A8A):
+    """Balão de fala com a ponta apontando pra (meio, base)."""
+    x1 = max(0, min(w - len(txt) - 5, meio - len(txt) // 2 - 2))
+    x2 = x1 + len(txt) + 3
+    y1 = base - 3
+    visivel = txt if n is None else txt[:n]
+    escrever(ch, co, w, h, x1, y1, "╭" + "─" * (x2 - x1 - 1) + "╮", borda, opaco=True)
+    escrever(ch, co, w, h, x1, y1 + 1, "│" + " " * (x2 - x1 - 1) + "│", borda, opaco=True)
+    escrever(ch, co, w, h, x1 + 2, y1 + 1, visivel, c)
+    escrever(ch, co, w, h, x1, y1 + 2, "╰" + "─" * (x2 - x1 - 1) + "╯", borda, opaco=True)
+    escrever(ch, co, w, h, max(x1 + 1, min(x2 - 1, meio)), y1 + 3, "╲" if meio > x1 + 2 else "╱", borda)
+
+
+class ClawdSoneca(Cena):
+    """Clawd tirando uma soneca debaixo das estrelas."""
+    combinavel = False
+    peso = 0.7
+    duracao = (35, 50)
+    FALAS = ["hm?", "✻ que lindo…", "…só mais 5 minutinhos…", "zzz… refatora… zzz", "sonhei com um bug",
+             "já acordei, já acordei", "era um meteoro ou um deploy?"]
+
+    def iniciar(self):
+        w, h = self.w, self.h
+        self.esc = 4 if w >= 120 and h >= 40 else 2
+        self.cw = 18 * self.esc
+        self.chao = h - 4
+        self.x = max(0, min(w - self.cw, (w - self.cw) // 2 + random.randint(-w // 6, w // 6)))
+        self.t = 0.0
+        self.estrelas = [(random.randrange(w), random.randrange(max(1, h - 10)), random.random(), random.uniform(0, 6.3))
+                         for _ in range(w * h // 55)]
+        r = random.uniform(4, 6.5)
+        self.lua = (random.choice((w * 0.15, w * 0.82)) + random.uniform(-5, 5), random.uniform(8, h * 0.45), r,
+                    random.uniform(0.35, 0.9) * random.choice((-1, 1)))
+        self.zs, self.prox_z = [], 0.5
+        self.cadente, self.prox_cadente = None, random.uniform(5, 10)
+        self.acordado, self.olhar = -1.0, 0
+        self.fala, self.fala_t = "", -10.0
+        self.vaga = [[random.uniform(0, w), random.uniform(h - 14, h - 5), random.uniform(0, 6.3)]
+                     for _ in range(random.randint(5, 10))]
+        self.grama = [(x, random.choice(",.'\"`")) for x in range(w) if random.random() < 0.35]
+
+    def draw(self, t, dt, ch, co):
+        self.t = t
+        w, h, s = self.w, self.h, self.esc
+        ch[:] = self.vazio
+        for x, y, b, f in self.estrelas:
+            v = b * (0.55 + 0.45 * math.sin(t * 1.7 + f))
+            escrever(ch, co, w, h, x, y, "*" if b > 0.93 else "·" if b > 0.6 else ".", escala(0xC8D2FF, 0.2 + 0.7 * v))
+        lx, ly, r, fase = self.lua
+        lua = {}
+        for py in range(int(ly - r) - 1, int(ly + r) + 2):
+            for x in range(int(lx - r) - 1, int(lx + r) + 2):
+                dx, dy = x + 0.5 - lx, py + 0.5 - ly
+                if dx * dx + dy * dy <= r * r:
+                    sombra = (dx - fase * r * 1.1) ** 2 + dy * dy <= (r * 0.95) ** 2
+                    lua[(x, py)] = 0x1A1A24 if sombra else 0xF5E6A8
+        blit(ch, co, w, h, lua)
+        if self.cadente is None and t >= self.prox_cadente:
+            vx = random.uniform(50, 80) * random.choice((-1, 1))
+            self.cadente = [random.uniform(w * 0.2, w * 0.8), random.uniform(1, h * 0.3), vx, random.uniform(8, 16), t]
+            self.acordado = t + 3.2
+            self.olhar = 1 if vx > 0 else -1
+            self.prox_cadente = t + random.uniform(8, 16)
+        if self.cadente:
+            x0, y0, vx, vy, t0 = self.cadente
+            idade = t - t0
+            for k in range(10):
+                a = max(0.0, idade - k * 0.012)
+                escrever(ch, co, w, h, int(x0 + vx * a), int(y0 + vy * a), "*" if k == 0 else "·",
+                         escala(0xFFFFFF, 1 - k / 10))
+            if idade > 1.4:
+                self.cadente = None
+                if random.random() < 0.6:
+                    self.fala, self.fala_t = random.choice(self.FALAS), t
+        for x in range(w):
+            escrever(ch, co, w, h, x, self.chao + 1, "▀", fundo(0x1F4F2A, 0x0B1A0F))
+            for y in range(self.chao + 2, h):
+                escrever(ch, co, w, h, x, y, "█", 0x0B1A0F)
+        for x, g in self.grama:
+            escrever(ch, co, w, h, x, self.chao, g, 0x2F6F3A)
+        for v in self.vaga:
+            v[0] += random.gauss(0, 0.3)
+            v[1] = min(h - 4.0, max(h - 16.0, v[1] + random.gauss(0, 0.1)))
+            b = (math.sin(t * 2 + v[2]) + 1) / 2
+            if b > 0.3:
+                escrever(ch, co, w, h, int(v[0]), int(v[1]), "•", escala(0xD8FF6A, b))
+        dormindo = t > self.acordado
+        bob = 1 if math.sin(t * 1.6) > 0.3 else 0
+        y0 = 2 * self.chao + 2 - 5 * s - bob
+        arte = arte_clawd(olhar=0 if dormindo else self.olhar, fechados=dormindo)
+        blit(ch, co, w, h, arte_pixels(arte, self.x, y0, s, CORES_CLAWD))
+        cabeca = y0 // 2
+        if dormindo and t >= self.prox_z:
+            self.zs.append([self.x + self.cw * 0.8, cabeca, t])
+            self.prox_z = t + random.uniform(1.0, 1.6)
+        vivos = []
+        for z in self.zs:
+            idade = t - z[2]
+            if idade < 3.5:
+                vivos.append(z)
+                escrever(ch, co, w, h, int(z[0] + idade * 2.5), int(z[1] - idade * 1.6), "z" if idade < 1.2 else "Z",
+                         escala(0xC8D8FF, 1 - idade / 3.5))
+        self.zs = vivos
+        if self.fala and t - self.fala_t < 3.0:
+            balao(ch, co, w, h, int(self.x + self.cw * 0.5), cabeca - 1, self.fala, int((t - self.fala_t) * 30))
+
+
+class ClawdFesta(Cena):
+    """Festa dos Clawds: coreografia sincronizada, luzes de boate e pista colorida."""
+    combinavel = False
+    peso = 0.7
+    duracao = (30, 45)
+    PASSOS = ["pulo", "onda", "balanco", "agacha", "olhar", "alternado"]
+    TITULOS = ["CLAWD PARTY", "CLAWD DISCO", "NIGHT FEVER", "DEPLOY PARTY"]
+
+    def iniciar(self):
+        w, h = self.w, self.h
+        self.batida = 60 / random.choice((108, 120, 128))
+        self.esc = 3 if w >= 150 and h >= 40 else 2
+        cw = 18 * self.esc
+        n = max(1, min(4, (w + 2) // (cw + 4)))
+        gap = (w - n * cw) / (n + 1)
+        self.frente = [int(gap + k * (cw + gap)) for k in range(n)]
+        nt = max(1, (w - 4) // 24)
+        gapt = (w - nt * 18) / (nt + 1)
+        self.atras = [int(gapt + k * (18 + gapt)) for k in range(nt)]
+        self.chao = h - 7
+        self.passo = random.choice(self.PASSOS)
+        self.prox_troca = 8
+        self.hue = random.random()
+        self.notas, self.confete = [], []
+        self.ult_batida = -1
+        self.titulo = meio_blocos(texto_grade(random.choice(self.TITULOS)))
+        self.focos = [(random.uniform(0.1, 0.9), random.uniform(0, 6.3), random.random())
+                      for _ in range(random.randint(3, 5))]
+
+    def pose(self, i, b, alt):
+        frac = b % 1
+        dx, dy, olhar, agacha, passo = 0, 0.0, 0, False, False
+        p = self.passo
+        if p == "pulo":
+            dy = math.sin(frac * math.pi) * alt
+        elif p == "onda":
+            dy = max(0.0, math.sin((b * 0.5 - i * 0.18) * 2 * math.pi)) * alt
+        elif p == "balanco":
+            dx = round(math.sin(b * math.pi) * 3)
+            passo = int(b) % 2 == 0
+        elif p == "agacha":
+            agacha = frac < 0.5
+            dy = 0.0 if agacha else math.sin((frac - 0.5) * 2 * math.pi) * alt * 0.5
+        elif p == "olhar":
+            olhar = 1 if int(b) % 2 else -1
+            dy = math.sin(frac * math.pi) * alt * 0.3
+        elif (int(b) + i) % 2 == 0:
+            dy = math.sin(frac * math.pi) * alt
+        return dx, max(0.0, dy), olhar, agacha, passo
+
+    def draw(self, t, dt, ch, co):
+        w, h = self.w, self.h
+        b = t / self.batida
+        nb, frac = int(b), b % 1
+        if nb >= self.prox_troca:
+            self.passo = random.choice([p for p in self.PASSOS if p != self.passo])
+            self.prox_troca = nb + 8
+            for _ in range(70):
+                self.confete.append([random.uniform(0, w), -1.0, random.uniform(-4, 4), random.uniform(6, 14),
+                                     random.choice("✻*+·•"), hsv(random.random(), 0.7, 1.0), t])
+        if nb != self.ult_batida:
+            self.ult_batida = nb
+            for _ in range(random.randint(1, 2)):
+                self.notas.append([random.uniform(2, w - 2), float(self.chao - 12), random.choice("♪♫"),
+                                   hsv(random.random(), 0.6, 1.0), t])
+        ch[:] = self.vazio
+        for x0, fase, hue in self.focos:
+            ang = math.sin(t * 0.8 + fase) * 0.55
+            c = escala(hsv(hue + t * 0.05, 0.7, 1.0), 0.22)
+            for y in range(self.chao + 1):
+                cx = x0 * w + math.tan(ang) * y * ASPECTO
+                meia = 1 + y * 0.35
+                for x in range(int(cx - meia), int(cx + meia) + 1):
+                    if 0 <= x < w:
+                        ch[y * w + x], co[y * w + x] = "░", c
+        tw = len(self.titulo[0])
+        for r, linha in enumerate(self.titulo):
+            for k, s in enumerate(linha):
+                if s != " ":
+                    escrever(ch, co, w, h, (w - tw) // 2 + k, 1 + r, s,
+                             hsv(self.hue + k / tw + nb * 0.1, 0.7, 0.7 + 0.3 * (1 - frac)))
+        pisca = (t % 3.7) < 0.12
+        pes_atras = self.chao - 5 * self.esc // 2 - 3
+        for i, x in enumerate(self.atras):
+            dy = max(0.0, math.sin((b * 0.5 - i * 0.12) * 2 * math.pi)) * 2
+            arte = arte_clawd(fechados=pisca)
+            cores = {k: escala(v, 0.55) for k, v in CORES_CLAWD.items()}
+            blit(ch, co, w, h, arte_pixels(arte, x, 2 * pes_atras + 2 - 5 - int(dy), 1, cores))
+        escrever(ch, co, w, h, 0, pes_atras + 1, "▁" * w, 0x3A2A4A)
+        s = self.esc
+        for i, x in enumerate(self.frente):
+            dx, dy, olhar, agacha, passo = self.pose(i, b, 6)
+            arte = arte_clawd(olhar=olhar, fechados=pisca, passo=passo, agachado=agacha)
+            y0 = 2 * self.chao + 2 - len(arte) * s - int(dy)
+            blit(ch, co, w, h, arte_pixels(arte, x + dx, y0, s, CORES_CLAWD))
+        for y in range(self.chao + 1, h):
+            for x in range(w):
+                tx, ty = x // 8, (y - self.chao - 1) // 2
+                aceso = (tx + ty + nb) % 2 == 0
+                c = hsv(self.hue + (tx + ty * 3 + nb) * 0.13, 0.7, (0.3 + 0.5 * (1 - frac)) if aceso else 0.18)
+                if x % 8 == 7:
+                    continue
+                ch[y * w + x], co[y * w + x] = ("▀" if (y - self.chao - 1) % 2 else "█"), c
+        vivas = []
+        for n_ in self.notas:
+            idade = t - n_[4]
+            if idade < 2.5:
+                vivas.append(n_)
+                escrever(ch, co, w, h, int(n_[0] + math.sin(idade * 4) * 2), int(n_[1] - idade * 3), n_[2],
+                         escala(n_[3], 1 - idade / 2.5))
+        self.notas = vivas
+        vivos = []
+        for c_ in self.confete:
+            c_[0] += c_[2] * dt
+            c_[1] += c_[3] * dt
+            if c_[1] < h and t - c_[6] < 5:
+                vivos.append(c_)
+                escrever(ch, co, w, h, int(c_[0]), int(c_[1]), c_[4], c_[5])
+        self.confete = vivos
+
+
+class ClawdEspaco(Cena):
+    """Clawd de jetpack voando pelo espaço, desviando de asteroides."""
+    combinavel = False
+    peso = 0.7
+    duracao = (30, 45)
+    FALAS = ["Houston, temos um bug.", "Rumo ao deploy!", "✻ Pondering the cosmos…", "Ao infinito e além do rate limit!",
+             "Isso é um buraco negro ou um memory leak?", "Uau.", "Mais rápido que um git push --force!"]
+
+    def iniciar(self):
+        w, h = self.w, self.h
+        self.esc = 3 if w >= 120 and h >= 36 else 2
+        self.cw, self.alt = 18 * self.esc, 5 * self.esc
+        self.x = int(w * 0.2)
+        self.y = float(h)
+        self.t = 0.0
+        self.estrelas = [[random.uniform(0, w), random.randrange(h), random.choice((1, 1, 2, 3))] for _ in range(w * h // 45)]
+        self.planetas = [self.novo_planeta(random.uniform(w * 0.45, w * 0.9))]
+        self.prox_planeta = random.uniform(10, 18)
+        self.asteroides, self.fogo, self.brilhos, self.itens = [], [], [], []
+        self.prox_ast = random.uniform(1.5, 3)
+        self.prox_item = random.uniform(3, 6)
+        self.fala, self.fala_t = "", -10.0
+        self.prox_fala = random.uniform(6, 12)
+
+    def novo_planeta(self, x=None):
+        r = random.uniform(6, 13)
+        return {"x": self.w + r * 2 + 2 if x is None else x, "y": random.uniform(r, 2 * self.h - r), "r": r,
+                "cor": hsv(random.random(), random.uniform(0.35, 0.7), 0.9), "anel": random.random() < 0.45,
+                "vel": random.uniform(1.5, 4), "faixa": random.random() < 0.5}
+
+    def planeta_pixels(self, p, px):
+        r, x0, y0 = p["r"], p["x"], p["y"]
+        anel = escala(p["cor"], 0.75)
+        a, bb = r * 1.9, r * 0.42
+        for py in range(int(y0 - r) - 1, int(y0 + r) + 2):
+            for x in range(int(x0 - a) - 1, int(x0 + a) + 2):
+                dx, dy = x + 0.5 - x0, py + 0.5 - y0
+                d2 = dx * dx + dy * dy
+                e = (dx / a) ** 2 + (dy / bb) ** 2
+                no_anel = p["anel"] and 0.78 < e < 1.12
+                if d2 <= r * r:
+                    if no_anel and dy > 0:
+                        px[(x, py)] = anel
+                        continue
+                    nz = math.sqrt(1 - d2 / (r * r))
+                    luz = clamp((-dx * 0.6 - dy * 0.5) / r * 0.8 + nz * 0.6)
+                    c = escala(p["cor"], 0.1 + 0.9 * luz)
+                    if p["faixa"] and int((dy / r + 1) * 4) % 2:
+                        c = escala(c, 0.8)
+                    px[(x, py)] = c
+                elif no_anel:
+                    px[(x, py)] = anel
+
+    def draw(self, t, dt, ch, co):
+        self.t = t
+        w, h, s = self.w, self.h, self.esc
+        ch[:] = self.vazio
+        for e in self.estrelas:
+            e[0] -= e[2] * 6 * dt
+            if e[0] < 0:
+                e[0] += w
+                e[1] = random.randrange(h)
+            escrever(ch, co, w, h, int(e[0]), e[1], ".·*"[e[2] - 1], (0x505060, 0x9090A0, 0xE0E0F0)[e[2] - 1])
+        if t >= self.prox_planeta:
+            self.planetas.append(self.novo_planeta())
+            self.prox_planeta = t + random.uniform(12, 20)
+        if t >= self.prox_ast:
+            r = random.uniform(2, 5)
+            self.asteroides.append({"x": w + r + 1, "y": random.uniform(r, 2 * h - r), "r": r,
+                                    "vel": random.uniform(15, 30), "sem": random.uniform(0, 6.3), "rot": random.uniform(-2, 2)})
+            self.prox_ast = t + random.uniform(0.8, 2.2)
+        if t >= self.prox_item:
+            self.itens.append([float(w), random.uniform(6, 2 * h - 6)])
+            self.prox_item = t + random.uniform(3, 7)
+        px = {}
+        for p in self.planetas:
+            p["x"] -= p["vel"] * dt
+        self.planetas = [p for p in self.planetas if p["x"] + p["r"] * 2 > 0]
+        for p in self.planetas:
+            self.planeta_pixels(p, px)
+        cy = self.y + math.sin(t * 3) * 1.5
+        topo, base = cy - self.alt / 2, cy + self.alt / 2
+        vivos = []
+        for a in self.asteroides:
+            a["x"] -= a["vel"] * dt
+            if a["x"] + a["r"] < 0:
+                continue
+            if self.x - a["r"] < a["x"] < self.x + self.cw + a["r"] and topo - a["r"] < a["y"] < base + a["r"]:
+                for _ in range(16):
+                    ang = random.uniform(0, 6.3)
+                    self.brilhos.append([a["x"], a["y"] / 2, math.cos(ang) * 12, math.sin(ang) * 6, "·", 0x9A9088, t])
+                self.fala, self.fala_t = "Ai!", t
+                continue
+            vivos.append(a)
+            r = a["r"]
+            for py in range(int(a["y"] - r) - 1, int(a["y"] + r) + 2):
+                for x in range(int(a["x"] - r) - 1, int(a["x"] + r) + 2):
+                    dx, dy = x + 0.5 - a["x"], py + 0.5 - a["y"]
+                    th = math.atan2(dy, dx) + t * a["rot"]
+                    rr = r * (0.75 + 0.25 * math.sin(3 * th + a["sem"]) * math.sin(5 * th + 2 * a["sem"]))
+                    if dx * dx + dy * dy <= rr * rr:
+                        px[(x, py)] = escala(0x8A8078, 0.35 + 0.65 * clamp(0.5 - (dx + dy) / (2 * r)))
+        self.asteroides = vivos
+        ameacas = [a for a in self.asteroides if self.x - 5 < a["x"] < self.x + self.cw + 45
+                   and abs(a["y"] - self.y) < a["r"] + self.alt / 2 + 3]
+        if ameacas:
+            a = min(ameacas, key=lambda a: a["x"])
+            alvo = a["y"] + (self.alt / 2 + a["r"] + 6) * (1 if self.y >= a["y"] else -1)
+        elif self.itens:
+            alvo = self.itens[0][1]
+        else:
+            alvo = h + math.sin(t * 0.5) * h * 0.45
+        alvo = max(self.alt / 2 + 2, min(2 * h - self.alt / 2 - 2, alvo))
+        self.y += (alvo - self.y) * min(1.0, dt * 3)
+        blit(ch, co, w, h, px)
+        for _ in range(6):
+            self.fogo.append([self.x - self.esc + 0.0, cy / 2 + random.uniform(-1.2, 1.2), -random.uniform(25, 45),
+                              random.uniform(-2.5, 2.5), t, random.uniform(0.3, 0.55)])
+        vivos = []
+        for f in self.fogo:
+            idade = (t - f[4]) / f[5]
+            if idade < 1:
+                vivos.append(f)
+                f[0] += f[2] * dt
+                f[1] += f[3] * dt
+                escrever(ch, co, w, h, int(f[0]), int(f[1]), "█▓▒░"[min(3, int(idade * 4))],
+                         escala(misturar(0xFFF6C8, 0xFF5A1F, idade * 1.6), 1 - idade * 0.45))
+        self.fogo = vivos
+        vivos = []
+        for it in self.itens:
+            it[0] -= 12 * dt
+            if it[0] < 0:
+                continue
+            if self.x <= it[0] <= self.x + self.cw and topo - 2 <= it[1] <= base + 2:
+                for _ in range(14):
+                    ang = random.uniform(0, 6.3)
+                    self.brilhos.append([it[0], it[1] / 2, math.cos(ang) * 14, math.sin(ang) * 7, "✻",
+                                         0xD97757, t])
+                continue
+            vivos.append(it)
+            escrever(ch, co, w, h, int(it[0]), int(it[1] / 2), "✻", 0xFFB38A if int(t * 4) % 2 else 0xD97757)
+        self.itens = vivos
+        corpo = arte_pixels(arte_clawd(olhar=1, fechados=(t % 4.1) < 0.13), self.x, int(topo), s, CORES_CLAWD)
+        for yy in range(int(topo) + s, int(topo) + 4 * s):
+            for xx in range(self.x - s, self.x + s):
+                corpo.setdefault((xx, yy), 0x9A9AA6)
+        blit(ch, co, w, h, corpo)
+        vivos = []
+        for b in self.brilhos:
+            if t - b[6] < 0.8:
+                vivos.append(b)
+                b[0] += b[2] * dt
+                b[1] += b[3] * dt
+                escrever(ch, co, w, h, int(b[0]), int(b[1]), b[4], escala(b[5], 1 - (t - b[6]) / 0.8))
+        self.brilhos = vivos
+        if t >= self.prox_fala:
+            self.fala, self.fala_t = random.choice(self.FALAS), t
+            self.prox_fala = t + random.uniform(8, 14)
+        if self.fala and t - self.fala_t < 3.0:
+            balao(ch, co, w, h, int(self.x + self.cw * 0.6), int(topo) // 2 - 1, self.fala, int((t - self.fala_t) * 30))
+
+
+class Tetris(Cena):
+    """Tetris jogando sozinho (uma IA simples escolhe cada jogada)."""
+    combinavel = False
+    duracao = (45, 60)
+    FORMAS = {"I": [(0, 0), (1, 0), (2, 0), (3, 0)], "O": [(0, 0), (1, 0), (0, 1), (1, 1)],
+              "T": [(0, 0), (1, 0), (2, 0), (1, 1)], "S": [(1, 0), (2, 0), (0, 1), (1, 1)],
+              "Z": [(0, 0), (1, 0), (1, 1), (2, 1)], "J": [(0, 0), (0, 1), (1, 1), (2, 1)],
+              "L": [(2, 0), (0, 1), (1, 1), (2, 1)]}
+    CORES = {"I": 0x00E5FF, "O": 0xFFE100, "T": 0xB04DFF, "S": 0x35E05A, "Z": 0xFF3B4E, "J": 0x3D7BFF, "L": 0xFF9A1F}
+    COLS, LINS = 10, 20
+
+    def iniciar(self):
+        self.bw, self.bh = (4, 2) if self.h >= 44 else (2, 1)
+        self.rots = {k: self.rotacoes(v) for k, v in self.FORMAS.items()}
+        self.t = 0.0
+        self.novo_jogo()
+
+    def rotacoes(self, cel):
+        out, atual = [], cel
+        for _ in range(4):
+            mx, my = min(x for x, y in atual), min(y for x, y in atual)
+            norm = sorted((x - mx, y - my) for x, y in atual)
+            if norm not in out:
+                out.append(norm)
+            atual = [(-y, x) for x, y in atual]
+        return out
+
+    def novo_jogo(self):
+        C, L = self.COLS, self.LINS
+        self.g = [[None] * C for _ in range(L)]
+        for y in range(L - random.randint(5, 9), L):
+            buraco = random.randrange(C)
+            self.g[y] = [None if x == buraco or random.random() < 0.12 else random.choice("IOTSZJL") for x in range(C)]
+        self.fila = []
+        self.pontos, self.feitas, self.nivel = 0, 0, 1
+        self.stats = {k: 0 for k in self.FORMAS}
+        self.limpando = set()
+        self.nova_peca()
+
+    def nova_peca(self):
+        while len(self.fila) < 2:
+            bolsa = list(self.FORMAS)
+            random.shuffle(bolsa)
+            self.fila += bolsa
+        self.p = self.fila.pop(0)
+        self.stats[self.p] += 1
+        self.pr, self.px, self.py = 0, 3, 0
+        self.acc = 0.0
+        if not self.cabe(self.p, 0, 3, 0):
+            self.estado, self.t_est = "fim", self.t
+            return
+        self.alvo = self.melhor()
+        self.estado = "mover"
+
+    def cabe(self, p, r, x, y):
+        for cx, cy in self.rots[p][r]:
+            X, Y = x + cx, y + cy
+            if X < 0 or X >= self.COLS or Y >= self.LINS or (Y >= 0 and self.g[Y][X]):
+                return False
+        return True
+
+    def melhor(self):
+        melhor, alvo = -1e9, (0, 3)
+        for r in range(len(self.rots[self.p])):
+            for x in range(-3, self.COLS):
+                if not self.cabe(self.p, r, x, 0):
+                    continue
+                y = 0
+                while self.cabe(self.p, r, x, y + 1):
+                    y += 1
+                nota = self.avaliar(self.p, r, x, y) + random.uniform(0, 0.08)
+                if nota > melhor:
+                    melhor, alvo = nota, (r, x)
+        return alvo
+
+    def avaliar(self, p, r, x, y):
+        C, L = self.COLS, self.LINS
+        g = [linha[:] for linha in self.g]
+        for cx, cy in self.rots[p][r]:
+            if y + cy >= 0:
+                g[y + cy][x + cx] = p
+        cheias = sum(1 for l in g if all(l))
+        g = [[None] * C for _ in range(cheias)] + [l for l in g if not all(l)]
+        alturas, buracos = [], 0
+        for cx in range(C):
+            alt, bloco = 0, False
+            for cy in range(L):
+                if g[cy][cx]:
+                    if not bloco:
+                        alt, bloco = L - cy, True
+                elif bloco:
+                    buracos += 1
+            alturas.append(alt)
+        bump = sum(abs(alturas[i] - alturas[i + 1]) for i in range(C - 1))
+        return -0.51 * sum(alturas) + 0.76 * cheias - 0.36 * buracos - 0.18 * bump
+
+    def travar(self):
+        for cx, cy in self.rots[self.p][self.pr]:
+            if self.py + cy >= 0:
+                self.g[self.py + cy][self.px + cx] = self.p
+        cheias = [i for i, l in enumerate(self.g) if all(l)]
+        if cheias:
+            self.limpando = set(cheias)
+            self.estado, self.t_est = "limpar", self.t
+            self.feitas += len(cheias)
+            self.pontos += (0, 100, 300, 500, 800)[len(cheias)] * self.nivel
+            self.nivel = 1 + self.feitas // 10
+        else:
+            self.pontos += 4
+            self.nova_peca()
+
+    def atualizar(self, t, dt):
+        if self.estado == "mover":
+            self.acc += dt
+            while self.acc >= 0.055 and self.estado == "mover":
+                self.acc -= 0.055
+                ra, xa = self.alvo
+                n = len(self.rots[self.p])
+                if self.pr != ra:
+                    nr = (self.pr + 1) % n
+                    if self.cabe(self.p, nr, self.px, self.py):
+                        self.pr = nr
+                    else:
+                        self.alvo = (self.pr, xa)
+                elif self.px != xa:
+                    nx = self.px + (1 if xa > self.px else -1)
+                    if self.cabe(self.p, self.pr, nx, self.py):
+                        self.px = nx
+                    else:
+                        self.alvo = (ra, self.px)
+                else:
+                    self.estado, self.acc = "cair", 0.0
+        elif self.estado == "cair":
+            self.acc += dt * 30
+            while self.acc >= 1 and self.estado == "cair":
+                self.acc -= 1
+                if self.cabe(self.p, self.pr, self.px, self.py + 1):
+                    self.py += 1
+                else:
+                    self.travar()
+        elif self.estado == "limpar":
+            if t - self.t_est > 0.4:
+                resto = [l for i, l in enumerate(self.g) if i not in self.limpando]
+                self.g = [[None] * self.COLS for _ in self.limpando] + resto
+                self.limpando = set()
+                self.nova_peca()
+        elif self.estado == "fim" and t - self.t_est > 1.6:
+            self.novo_jogo()
+
+    def bloco(self, ch, co, x, y, c, fantasma=False):
+        w, h = self.w, self.h
+        if fantasma:
+            c = escala(c, 0.4)
+            if self.bw == 4:
+                escrever(ch, co, w, h, x, y, "┌──┐", c)
+                escrever(ch, co, w, h, x, y + 1, "└──┘", c)
+            else:
+                escrever(ch, co, w, h, x, y, "░░", c)
+        elif self.bw == 4:
+            escrever(ch, co, w, h, x, y, "▐██▌", misturar(c, 0xFFFFFF, 0.35))
+            escrever(ch, co, w, h, x, y + 1, "▐██▌", c)
+        else:
+            escrever(ch, co, w, h, x, y, "▐▌", c)
+
+    def draw(self, t, dt, ch, co):
+        self.t = t
+        self.atualizar(t, dt)
+        ch[:] = self.vazio
+        w, h, bw, bh, C, L = self.w, self.h, self.bw, self.bh, self.COLS, self.LINS
+        ox, oy = w // 2 - C * bw // 2, max(1, (h - L * bh) // 2)
+        borda = 0x4A4A5A
+        escrever(ch, co, w, h, ox - 1, oy - 1, "┌" + "─" * (C * bw) + "┐", borda)
+        escrever(ch, co, w, h, ox - 1, oy + L * bh, "└" + "─" * (C * bw) + "┘", borda)
+        for y in range(oy, oy + L * bh):
+            escrever(ch, co, w, h, ox - 1, y, "│", borda)
+            escrever(ch, co, w, h, ox + C * bw, y, "│", borda)
+        pisca = int((t - getattr(self, "t_est", 0)) * 20) % 2 == 0
+        fim = self.estado == "fim"
+        cheias_fim = int((t - self.t_est) * 16) if fim else 0
+        for r in range(L):
+            for c in range(C):
+                x, y = ox + c * bw, oy + r * bh
+                p = self.g[r][c]
+                if fim and L - 1 - r < cheias_fim:
+                    self.bloco(ch, co, x, y, 0x5A5A66)
+                elif p:
+                    cor_ = 0xFFFFFF if (r in self.limpando and pisca) else self.CORES[p]
+                    self.bloco(ch, co, x, y, cor_)
+                else:
+                    escrever(ch, co, w, h, x + bw // 2, y, "·", 0x24242E)
+        if self.estado in ("mover", "cair"):
+            gy = self.py
+            while self.cabe(self.p, self.pr, self.px, gy + 1):
+                gy += 1
+            c_ = self.CORES[self.p]
+            for cx, cy in self.rots[self.p][self.pr]:
+                if gy + cy >= 0 and gy != self.py:
+                    self.bloco(ch, co, ox + (self.px + cx) * bw, oy + (gy + cy) * bh, c_, fantasma=True)
+            for cx, cy in self.rots[self.p][self.pr]:
+                if self.py + cy >= 0:
+                    self.bloco(ch, co, ox + (self.px + cx) * bw, oy + (self.py + cy) * bh, c_)
+        branco, cinza = 0xE0E0E0, 0x8A8A8A
+        xr = ox + C * bw + 4
+        escrever(ch, co, w, h, xr, oy + 1, "NEXT", cinza)
+        prox = self.fila[0]
+        for cx, cy in self.rots[prox][0]:
+            self.bloco(ch, co, xr + cx * bw, oy + 3 + cy * bh, self.CORES[prox])
+        ys = oy + 4 + 2 * bh + 2
+        for k, (rot, val) in enumerate((("SCORE", f"{self.pontos:06d}"), ("LINES", f"{self.feitas:03d}"),
+                                         ("LEVEL", f"{self.nivel:02d}"))):
+            escrever(ch, co, w, h, xr, ys + k * 4, rot, cinza)
+            escrever(ch, co, w, h, xr, ys + k * 4 + 1, val, branco)
+        if int(t * 1.5) % 2 == 0:
+            escrever(ch, co, w, h, xr, ys + 13, "DEMO · IA JOGANDO", 0xFF9A1F)
+        xl = ox - 30
+        if xl >= 1:
+            escrever(ch, co, w, h, xl, oy + 1, "STATISTICS", cinza)
+            for k, p in enumerate("TJZOSLI"):
+                y = oy + 3 + k * 3
+                for cx, cy in self.rots[p][0]:
+                    escrever(ch, co, w, h, xl + cx * 2, y + cy, "██", self.CORES[p])
+                escrever(ch, co, w, h, xl + 12, y, f"{self.stats[p]:03d}", self.CORES[p])
+
+
+class DVD(Cena):
+    """O logo do DVD quicando. Uma hora ele acerta o canto."""
+    combinavel = False
+    duracao = (32, 42)
+
+    def iniciar(self):
+        g = texto_grade("DVD", 2)
+        lw = len(g[0])
+        disco = [[((px + 0.5 - lw / 2) / (lw / 2)) ** 2 + ((py + 0.5 - 2.5) / 2.5) ** 2 <= 1 for px in range(lw)]
+                 for py in range(5)]
+        self.logo = meio_blocos(g + [[False] * lw] + disco)
+        self.lw, self.lh = lw, len(self.logo)
+        self.rola = None
+        if OVOS or random.random() < 0.25:
+            self.rola, pw, ph = rola_pixels(0.36)
+            self.lw, self.lh = pw, (ph + 1) // 2
+        self.maxx, self.maxy = max(1, self.w - self.lw), max(1, self.h - self.lh)
+        tc = random.uniform(7, 15)
+        x, y = float(random.choice((0, self.maxx))), float(random.choice((0, self.maxy)))
+        vx, vy = (13.0 if x == 0 else -13.0), (6.5 if y == 0 else -6.5)
+        for _ in range(int(tc * 60)):
+            x, vx, _b = self.mover(x, vx, self.maxx, 1 / 60)
+            y, vy, _b = self.mover(y, vy, self.maxy, 1 / 60)
+        self.x, self.y, self.vx, self.vy = x, y, -vx, -vy
+        self.cor = self.cor_nova()
+        self.ult = [-10.0, -10.0]
+        self.festa = None
+        self.confete = []
+        self.cantos = 0
+        self.grito = meio_blocos(texto_grade("ACERTOU O CANTO!"))
+
+    @staticmethod
+    def mover(x, v, maximo, dt):
+        x += v * dt
+        if x < 0:
+            return -x, -v, True
+        if x > maximo:
+            return 2 * maximo - x, -v, True
+        return x, v, False
+
+    def cor_nova(self):
+        return hsv(random.random(), 0.8, 1.0)
+
+    def draw(self, t, dt, ch, co):
+        w, h = self.w, self.h
+        self.x, self.vx, bx = self.mover(self.x, self.vx, self.maxx, dt)
+        self.y, self.vy, by = self.mover(self.y, self.vy, self.maxy, dt)
+        if bx:
+            self.ult[0] = t
+        if by:
+            self.ult[1] = t
+        if bx or by:
+            self.cor = self.cor_nova()
+            if abs(self.ult[0] - self.ult[1]) < 0.12 and (self.festa is None or t - self.festa > 2):
+                self.festejar(t)
+        ch[:] = self.vazio
+        vivos = []
+        for c in self.confete:
+            c[3] += 18 * dt
+            c[0] += c[2] * dt
+            c[1] += c[3] * dt
+            c[2] *= 0.99
+            if t - c[6] < c[7] and 0 <= c[0] < w and c[1] < h:
+                vivos.append(c)
+                escrever(ch, co, w, h, int(c[0]), int(c[1]), c[4], c[5])
+        self.confete = vivos
+        xi, yi = int(self.x), int(self.y)
+        if self.rola:
+            blit(ch, co, w, h, {(xi + x, 2 * yi + y): misturar(c, self.cor, 0.45) for (x, y), c in self.rola.items()})
+        else:
+            for r, linha in enumerate(self.logo):
+                escrever(ch, co, w, h, xi, yi + r, linha, self.cor)
+            yv, xv = yi + self.lh - 2, xi + (self.lw - 9) // 2
+            for k, s in enumerate("V I D E O"):
+                if s != " " and 0 <= xv + k < w and 0 <= yv < h:
+                    ch[yv * w + xv + k] = s
+                    co[yv * w + xv + k] = fundo(0x000000, self.cor)
+        if self.festa is not None and t - self.festa < 4.5 and (t - self.festa > 1.5 or int((t - self.festa) * 4) % 2 == 0):
+            gw = len(self.grito[0])
+            gx, gy = (w - gw) // 2, h // 2 - 1
+            for r, linha in enumerate(self.grito):
+                for k, s in enumerate(linha):
+                    if s != " ":
+                        escrever(ch, co, w, h, gx + k, gy + r, s, hsv(k / gw + t * 0.8, 0.75, 1.0))
+        if self.cantos:
+            txt = f"cantos acertados: {self.cantos}"
+            escrever(ch, co, w, h, w - len(txt) - 2, h - 1, txt, 0x6A6A6A)
+
+    def festejar(self, t):
+        self.festa = t
+        self.cantos += 1
+        cx = 0 if self.x < self.maxx / 2 else self.w - 1
+        cy = 0 if self.y < self.maxy / 2 else self.h - 1
+        base = math.atan2(self.h / 2 - cy, (self.w / 2 - cx) / ASPECTO)
+        for _ in range(180):
+            a = base + random.uniform(-0.9, 0.9)
+            sp = random.uniform(15, 45)
+            self.confete.append([float(cx), float(cy), math.cos(a) * sp * ASPECTO * 0.5, math.sin(a) * sp * 0.5,
+                                 random.choice("*+•·✦x"), hsv(random.random(), 0.7, 1.0), t, random.uniform(2.5, 4)])
+
+
+class Labirinto(Cena):
+    """Andando por um labirinto 3D (raycasting, estilo Wolfenstein)."""
+    duracao = (30, 45)
+    DIRS = [(1, 0), (0, 1), (-1, 0), (0, -1)]
+    ANG = [0.0, math.pi / 2, math.pi, -math.pi / 2]
+
+    def iniciar(self):
+        self.tema = random.choice(("arame", "tijolo", "neon"))
+        n = 21
+        g = [[1] * n for _ in range(n)]
+        pilha = [(1, 1)]
+        g[1][1] = 0
+        while pilha:
+            x, y = pilha[-1]
+            viz = [(dx, dy) for dx, dy in ((2, 0), (-2, 0), (0, 2), (0, -2))
+                   if 0 < x + dx < n - 1 and 0 < y + dy < n - 1 and g[y + dy][x + dx]]
+            if viz:
+                dx, dy = random.choice(viz)
+                g[y + dy // 2][x + dx // 2] = 0
+                g[y + dy][x + dx] = 0
+                pilha.append((x + dx, y + dy))
+            else:
+                pilha.pop()
+        for _ in range(14):
+            x, y = random.randrange(1, n - 1), random.randrange(1, n - 1)
+            if g[y][x] and ((not g[y][x - 1] and not g[y][x + 1]) or (not g[y - 1][x] and not g[y + 1][x])):
+                g[y][x] = 0
+        self.g = g
+        paredes = [(x, y) for y in range(1, n - 1) for x in range(1, n - 1)
+                   if g[y][x] and any(not g[y + dy][x + dx] for dx, dy in self.DIRS)]
+        self.grafite = set(random.sample(paredes, min(5, len(paredes))))
+        self.cel = (1, 1)
+        self.d = 0 if not g[1][2] else 1
+        self.pos = [1.5, 1.5]
+        self.ang = self.ANG[self.d]
+        self.bob = 0.0
+        self.t = 0.0
+        self.K = self.w / 2.64
+        self.gen = self.andar()
+
+    def andar(self):
+        while True:
+            cx, cy = self.cel
+            for nd in ((self.d + 1) % 4, self.d, (self.d + 3) % 4, (self.d + 2) % 4):
+                dx, dy = self.DIRS[nd]
+                if not self.g[cy + dy][cx + dx]:
+                    break
+            if nd != self.d:
+                a0 = self.ang
+                diff = (self.ANG[nd] - a0 + math.pi) % (2 * math.pi) - math.pi
+                ini = self.t
+                while self.t - ini < 0.45:
+                    self.ang = a0 + diff * suave((self.t - ini) / 0.45)
+                    yield
+                self.ang = a0 + diff
+                self.d = nd
+            dx, dy = self.DIRS[self.d]
+            x0, y0 = self.pos
+            ini = self.t
+            while self.t - ini < 0.42:
+                p = (self.t - ini) / 0.42
+                self.pos = [x0 + dx * p, y0 + dy * p]
+                self.bob = math.sin(p * math.pi) * 0.6
+                yield
+            self.bob = 0.0
+            self.cel = (cx + dx, cy + dy)
+            self.pos = [cx + dx + 0.5, cy + dy + 0.5]
+
+    def draw(self, t, dt, ch, co):
+        self.t = t
+        next(self.gen)
+        w, h, K, g, tema = self.w, self.h, self.K, self.g, self.tema
+        px, py = self.pos
+        dx_, dy_ = math.cos(self.ang), math.sin(self.ang)
+        plx, ply = -dy_ * 0.66, dx_ * 0.66
+        cy = h / 2 + self.bob
+        floor = math.floor
+        if tema == "arame":
+            aresta, piso, teto = 0x39FF6A, 0x1F9F45, 0x145F2E
+        elif tema == "neon":
+            aresta, piso, teto = 0x00F0FF, 0xFF2BD6, 0x5A1A7A
+        else:
+            aresta, piso, teto = 0xB5533C, 0x6B5A4A, 0
+        for x in range(w):
+            cam = 2 * x / w - 1
+            rx, ry = dx_ + plx * cam, dy_ + ply * cam
+            mx, my = int(px), int(py)
+            ddx = abs(1 / rx) if rx else 1e30
+            ddy = abs(1 / ry) if ry else 1e30
+            if rx < 0:
+                sx, sdx = -1, (px - mx) * ddx
+            else:
+                sx, sdx = 1, (mx + 1 - px) * ddx
+            if ry < 0:
+                sy, sdy = -1, (py - my) * ddy
+            else:
+                sy, sdy = 1, (my + 1 - py) * ddy
+            while True:
+                if sdx < sdy:
+                    sdx += ddx
+                    mx += sx
+                    lado = 0
+                else:
+                    sdy += ddy
+                    my += sy
+                    lado = 1
+                if g[my][mx]:
+                    break
+            dist = max(0.05, (sdx - ddx) if lado == 0 else (sdy - ddy))
+            wx = (py + dist * ry) if lado == 0 else (px + dist * rx)
+            wx -= floor(wx)
+            alt = K / dist
+            topo, base = cy - alt / 2, cy + alt / 2
+            yt, yb = int(topo), int(base)
+            v = clamp(1.6 / (dist + 0.6)) * (0.7 if lado else 1.0)
+            borda = wx < 0.035 or wx > 0.965
+            pichada = (mx, my) in self.grafite and alt > 6
+            for y in range(h):
+                i = y * w + x
+                if y < yt or y > yb:
+                    if tema == "tijolo":
+                        if y > yb:
+                            f = clamp((y - cy) / (h / 2))
+                            ch[i] = ".:-="[min(3, int(f * 4))]
+                            co[i] = escala(piso, 0.25 + 0.55 * f)
+                        else:
+                            ch[i] = " "
+                        continue
+                    dd = K / (2 * (y + 0.5 - cy)) if y > yb else K / (2 * (cy - y - 0.5))
+                    if dd <= 0 or dd > 14:
+                        ch[i] = " "
+                        continue
+                    fx, fy = px + dd * rx, py + dd * ry
+                    fx -= floor(fx)
+                    fy -= floor(fy)
+                    lx, ly = fx < 0.07 or fx > 0.93, fy < 0.07 or fy > 0.93
+                    if lx or ly:
+                        ch[i] = "+" if lx and ly else "·"
+                        co[i] = escala(piso if y > yb else teto, clamp(1.3 / (dd + 0.3)))
+                    else:
+                        ch[i] = " "
+                    continue
+                if pichada:
+                    r = rola_regiao((wx * 1.3 - 0.15) * 76, ((y + 0.5 - topo) / alt * 1.15 - 0.075) * 92)
+                    if r:
+                        ch[i], co[i] = "█", escala(ROLA_CORES[r[0]][1] if tema == "tijolo" else 0xFF4FD8, 0.35 + 0.65 * v)
+                        continue
+                if tema == "tijolo":
+                    c = escala(aresta, v)
+                    s = "░▒▓█"[min(3, int(v * 4))]
+                    if alt > 10:
+                        ty = (y - topo) / alt * 4
+                        off = 0.5 if int(ty) % 2 else 0.0
+                        if ty - floor(ty) < 0.14:
+                            s, c = "─", escala(0x3A2A25, v * 1.4)
+                        elif (wx * 2 + off) % 1 < 0.07:
+                            s, c = "│", escala(0x3A2A25, v * 1.4)
+                    ch[i], co[i] = s, c
+                elif y == yt or y == yb:
+                    ch[i], co[i] = "─", escala(aresta, v)
+                elif borda:
+                    ch[i], co[i] = "│", escala(aresta, v)
+                elif tema == "neon":
+                    ch[i], co[i] = "█", escala(0x0B0B2B, 0.5 + v)
+                else:
+                    ch[i] = " "
+
+
+class Preto(Cena):
+    """Tela preta: ponte entre cenas que usam perfis (tamanhos de fonte) diferentes."""
+    combinavel = False
+    duracao = (1e9, 1e9)
+
+    def __init__(self, paleta=None):
+        pass
+
+    def draw(self, t, dt, ch, co):
+        ch[:] = self.vazio
+
+
+class Combo(Cena):
+    """Duas cenas juntas: a de cima por cima da de baixo apagadinha."""
+
+    def __init__(self, baixo, cima):
+        self.baixo, self.cima = baixo, cima
+        self.duracao = baixo.duracao
+
+    def resize(self, w, h):
+        self.n = w * h
+        self.tch, self.tco = [" "] * self.n, [0] * self.n
+        self.baixo.resize(w, h)
+        self.cima.resize(w, h)
+
+    def draw(self, t, dt, ch, co):
+        self.baixo.draw(t, dt, ch, co)
+        self.cima.draw(t, dt, self.tch, self.tco)
+        tch, tco = self.tch, self.tco
+        for i in range(self.n):
+            if tch[i] != " ":
+                ch[i], co[i] = tch[i], tco[i]
+            elif ch[i] != " ":
+                co[i] = apagar(co[i])
+
+
+# ------------------------------------------------ easter egg: o logo do fastfetch (mesmo desenho do gerar-logo.py)
+
+ROLA_CORES = {"glande": (0xFFC4D4, 0xF08CAA, 0xC45A80), "corpo": (0xFFE2CC, 0xF2B898, 0xC8886C),
+              "bola": (0xF6C4B4, 0xDA9A8A, 0xA86C62), "fenda": (0x80324A, 0x80324A, 0x80324A)}
+ROLA_SHINY = {"glande": (0xE0D0FF, 0xB098F0, 0x7860C0), "corpo": (0xD8F4FF, 0xA0D4F0, 0x6898C0),
+              "bola": (0xD0ECF8, 0x98C4E0, 0x6890B0), "fenda": (0x40306A, 0x40306A, 0x40306A)}
+_LUZ_ROLA = (-0.55 / 0.993, -0.6 / 0.993, 0.58 / 0.993)
+
+
+def rola_regiao(x, y):
+    """Parte do desenho no ponto (x, y) do espaço 76x92 do logo: (parte, nx, ny) ou None."""
+    cx = 38
+    dx, dy = (x - cx) / 15.5, (y - 20) / 16
+    if dx * dx + dy * dy <= 1 and y <= 29:
+        if abs(x - cx) < 1.1 and 5 <= y <= 11:
+            return ("fenda", 0.0, 0.0)
+        return ("glande", dx * 0.9, dy * 0.9)
+    for bx in (cx - 13, cx + 13):
+        ddx, ddy = (x - bx) / 15.5, (y - 74) / 15.5
+        if ddx * ddx + ddy * ddy <= 1:
+            return ("bola", ddx, ddy)
+    if cx - 12 <= x <= cx + 12 and 24 <= y <= 70:
+        return ("corpo", (x - cx) / 12.5, 0.0)
+    return None
+
+
+def rola_luz(nx, ny):
+    nz = math.sqrt(max(0.0, 1 - nx * nx - ny * ny))
+    return max(0.0, nx * _LUZ_ROLA[0] + ny * _LUZ_ROLA[1] + nz * _LUZ_ROLA[2])
+
+
+def rola_pixels(esc, deitada=False, cores=ROLA_CORES, carinha=False, contorno=0x4A2228):
+    """Desenho em pixels com sombreado e contorno; deitada = apontando pra direita. Devolve (dict, largura, altura)."""
+    W, H = 76, 92
+    pw, ph = (int(H * esc) + 2, int(W * esc) + 2) if deitada else (int(W * esc) + 2, int(H * esc) + 2)
+    grade = {}
+    for py in range(ph):
+        for px in range(pw):
+            if deitada:
+                x, y = (py - 0.5) / esc, (pw - 1.5 - px) / esc
+            else:
+                x, y = (px - 0.5) / esc, (py - 0.5) / esc
+            r = rola_regiao(x, y)
+            if r:
+                grade[(px, py)] = r
+    out = {}
+    for (px, py), (parte, nx, ny) in grade.items():
+        tons = cores[parte]
+        b = rola_luz(nx, ny)
+        c = tons[0] if b > 0.78 else tons[1] if b > 0.42 else tons[2]
+        for q in ((px + 1, py), (px - 1, py), (px, py + 1), (px, py - 1)):
+            g = grade.get(q)
+            if g and g[0] != parte and "fenda" not in (parte, g[0]) and (parte == "glande" or g[0] == "bola"):
+                c = tons[2]
+                break
+        out[(px, py)] = c
+    for (px, py) in list(grade):
+        for q in ((px + 1, py), (px - 1, py), (px, py + 1), (px, py - 1)):
+            if q not in grade:
+                out[q] = contorno
+    if carinha and not deitada:
+        r_olho = max(1.0, esc * 2.4)
+        for ex in (31.5, 44.5):
+            cx_, cy_ = 0.5 + ex * esc, 0.5 + 17 * esc
+            for py in range(int(cy_ - r_olho) - 1, int(cy_ + r_olho) + 2):
+                for px in range(int(cx_ - r_olho) - 1, int(cx_ + r_olho) + 2):
+                    if (px + 0.5 - cx_) ** 2 + (py + 0.5 - cy_) ** 2 <= r_olho * r_olho:
+                        out[(px, py)] = 0x202020
+            out[(int(cx_ - r_olho * 0.4), int(cy_ - r_olho * 0.4))] = 0xFFFFFF
+        for k in range(-3, 4):
+            px = int(0.5 + (38 + k * 1.6) * esc)
+            py = int(0.5 + (22.5 + (9 - k * k) * 0.3) * esc)
+            out[(px, py)] = 0x7A2A3A
+    return out, pw, ph
+
+
+def sprite_rola_gba(shiny=False):
+    """Sprite 64x64 (grade de cores) do Pokémon secreto."""
+    esc = 58 / 92
+    px, pw, ph = rola_pixels(esc, cores=ROLA_SHINY if shiny else ROLA_CORES, carinha=True)
+    ox, oy = (64 - pw) // 2, 63 - ph
+    grade = [[0] * 64 for _ in range(64)]
+    for (x, y), c in px.items():
+        if 0 <= x + ox < 64 and 0 <= y + oy < 64:
+            grade[y + oy][x + ox] = c
+    return grade
+
+
+class RolaVoadora:
+    """Passa voando com asinhas e rastro de arco-íris, estilo Nyan Cat."""
+    ARCO = (0xFF2020, 0xFF9A00, 0xFFF000, 0x40FF20, 0x1E9BFF, 0x7A3CFF)
+    # asas: o = contorno, w = branco; a raiz (R) é o ponto preso no corpo
+    CIMA = ("..........oo..",
+            "........oowwo.",
+            "......oowwwwo.",
+            "....oowwwwwwo.",
+            "...owwwwwwwwo.",
+            "..ooowwwwwwwo.",
+            ".owwwwwwwwwwo.",
+            "..oooowwwwwwo.",
+            ".owwwwwwwwwo..",
+            "..ooowwwwwwo..",
+            "....owwwwwo...",
+            ".....oowwo....",
+            ".......oRo....")
+    MEIO = ("oooo..............",
+            "owwwooooo.........",
+            ".owwwwwwwoooo.....",
+            "..owwwwwwwwwwoo...",
+            "..oowwwwwwwwwwwo..",
+            "...owwowwowwwwwo..",
+            "...owwowwowwwwo...",
+            "....oo.oo.oooRo...")
+    BAIXO = ("........oRo..",
+             "......oowwo..",
+             "....oowwwwwo.",
+             "..oowwwwwwwo.",
+             ".owwwwwwwwo..",
+             "owwowwowwo...",
+             "owwowwowo....",
+             ".oo.oo.o.....")
+    QUADROS = (CIMA, MEIO, BAIXO, MEIO)
+
+    def asa(self, px, q, ax, ay, borda, miolo, atras=False):
+        for j, linha in enumerate(q):
+            if "R" in linha:
+                rx, ry = linha.index("R"), j
+        for j, linha in enumerate(q):
+            for i, c in enumerate(linha):
+                if c == ".":
+                    continue
+                pos = (ax + i - rx, ay + j - ry - (2 if atras else 0))
+                px[pos] = miolo if c == "w" else borda
+
+    def __init__(self, w, h):
+        self.w, self.h = w, h
+        self.corpo, self.pw, self.ph = rola_pixels(0.42, deitada=True)
+        self.raiz = []
+        for f in (0.5, 0.62):
+            rx = int(self.pw * f)
+            self.raiz.append((rx, min(y for (x, y) in self.corpo if x == rx) + 1))
+        self.t = 0.0
+        self.dur = random.uniform(3.2, 4.5)
+        self.y0 = random.uniform(0.25, 0.65) * 2 * h
+        self.estrelas = []
+
+    def desenhar(self, ch, co, w, h, dt):
+        self.t += dt
+        p = self.t / self.dur
+        if p > 1.15:
+            return False
+        x0 = int(-self.pw - 10 + p * (w + self.pw + 40))
+        y0 = int(self.y0 + math.sin(self.t * 5) * 6 - self.ph / 2)
+        px = {}
+        meio = y0 + self.ph // 2
+        for x in range(0, x0 + 8):
+            onda = 1 if ((x // 5) + int(self.t * 10)) % 2 else 0
+            for k, c in enumerate(self.ARCO):
+                for e in (0, 1):
+                    px[(x, meio - 6 + k * 2 + e + onda)] = c
+        q = self.QUADROS[int(self.t * 9) % 4]
+        self.asa(px, q, x0 + self.raiz[0][0], y0 + self.raiz[0][1], 0x8890A8, 0xC8CEE0, atras=True)
+        for (x, y), c in self.corpo.items():
+            px[(x + x0, y + y0)] = c
+        self.asa(px, q, x0 + self.raiz[1][0], y0 + self.raiz[1][1], 0xA8B0C8, 0xFFFFFF)
+        blit(ch, co, w, h, px)
+        if random.random() < 0.6:
+            self.estrelas.append([random.uniform(0, max(1, x0)), random.uniform(meio / 2 - 6, meio / 2 + 6), self.t])
+        vivas = []
+        for s in self.estrelas:
+            if self.t - s[2] < 0.6:
+                vivas.append(s)
+                escrever(ch, co, w, h, int(s[0]), int(s[1]), random.choice("✦*+·"), random.choice((0xFFFFFF, 0xFFF4A0)))
+        self.estrelas = vivas
+        return True
+
+
+class Extras:
+    """Easter eggs que podem cair por cima de qualquer cena (a rola voadora)."""
+    CHANCE = 0.02
+
+    def __init__(self):
+        self.cena = None
+        self.quando = None
+        self.voo = None
+
+    def quadro(self, cena, t, dt, ch, co, w, h):
+        if cena is not self.cena:
+            self.cena = cena
+            pode = not isinstance(cena, (Preto, Pokemon)) and w <= 200
+            self.quando = t + (random.uniform(1, 3) if OVOS else random.uniform(4, 16)) if pode and (OVOS or random.random() < self.CHANCE) else None
+        if self.quando is not None and t >= self.quando:
+            self.quando = None
+            self.voo = RolaVoadora(w, h)
+        if self.voo and not self.voo.desenhar(ch, co, w, h, dt):
+            self.voo = None
+
+
+CENAS = [Matrix, Plasma, Tunel, Estrelas, Fogo, Ondas, Vida, Rosca, Hex, Synthwave,
+         Pokemon, Clawd, ClawdSoneca, ClawdFesta, ClawdEspaco, Tetris, DVD, Labirinto]
+POR_CIMA = [Matrix, Matrix, Estrelas, Ondas]
+
+
+def sortear_cena(anterior=None):
+    nomes_ant = set()
+    if anterior is not None:
+        nomes_ant = {type(c).__name__ for c in (getattr(anterior, "baixo", anterior), getattr(anterior, "cima", anterior))}
+    base = [Matrix, DVD, Labirinto, Clawd, Pokemon, Hex, Estrelas] if OVOS else CENAS
+    opcoes = [c for c in base if c.__name__ not in nomes_ant and (not hasattr(c, "disponivel") or c.disponivel())]
+    opcoes = opcoes or [c for c in CENAS if not hasattr(c, "disponivel")]
+    cls = random.choices(opcoes, weights=[c.peso for c in opcoes])[0]
+    cena = cls(random.choice(PALETAS_SORTEIO))
+    if cls.combinavel and random.random() < CHANCE_COMBO:
+        cima = random.choice([c for c in POR_CIMA if c is not cls])
+        cena = cena if OVOS else Combo(cena, cima(random.choice(PALETAS_SORTEIO)))
+    return cena
+
+
+def mascara(w, h):
+    """Ordem em que as células passam pra próxima cena (0..1)."""
+    tipo = random.choice(("pontos", "centro", "lado", "chuva", "diagonal"))
+    cx, cy = w / 2, h / 2
+    rmax = math.hypot(cx, cy * ASPECTO)
+    atraso = [random.random() for _ in range(w)]
+    lado = random.choice((False, True))
+    out = []
+    for y in range(h):
+        for x in range(w):
+            j = random.random() * 0.12
+            if tipo == "pontos":
+                v = random.random()
+            elif tipo == "centro":
+                v = math.hypot(x - cx, (y - cy) * ASPECTO) / rmax * 0.88 + j
+            elif tipo == "lado":
+                v = (x / w if lado else 1 - x / w) * 0.88 + j
+            elif tipo == "chuva":
+                v = (y / h) * 0.6 + atraso[x] * 0.3 + j * 0.5
+            else:
+                v = ((x / w + y / h) / 2) * 0.88 + j
+            out.append(v)
+    return out
+
+
+def render(ch, co, w, h):
+    out = ["\x1b[?2026h"]
+    ultima = -1
+    com_fundo = False
+    for y in range(h):
+        out.append("\x1b[%d;1H" % (y + 1))
+        base = y * w
+        for i in range(base, base + w):
+            c = ch[i]
+            if c == " ":
+                if com_fundo:
+                    out.append("\x1b[49m")
+                    com_fundo = False
+                    ultima &= 0xFFFFFF
+                out.append(" ")
+                continue
+            k = co[i]
+            if k != ultima:
+                if k & BG:
+                    bg = (k >> 24) & 0xFFFFFF
+                    out.append("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm" % ((k >> 16) & 255, (k >> 8) & 255, k & 255,
+                                                                    bg >> 16, (bg >> 8) & 255, bg & 255))
+                    com_fundo = True
+                else:
+                    out.append("\x1b[%s38;2;%d;%d;%dm" % ("49;" if com_fundo else "", k >> 16, (k >> 8) & 255, k & 255))
+                    com_fundo = False
+                ultima = k
+            out.append(c)
+    if com_fundo:
+        out.append("\x1b[49m")
+    out.append("\x1b[?2026l")
+    return "".join(out)
+
+
+def perfil_konsole(nome=None):
+    """Lê (nome=None) ou troca o perfil da sessão do Konsole onde o screensaver está rodando."""
+    svc, sess = os.environ.get("KONSOLE_DBUS_SERVICE"), os.environ.get("KONSOLE_DBUS_SESSION")
+    if not svc or not sess:
+        return None
+    metodo = ["org.kde.konsole.Session.profile"] if nome is None else ["org.kde.konsole.Session.setProfile", nome]
+    try:
+        r = subprocess.run(["gdbus", "call", "--session", "--dest", svc, "--object-path", sess, "--method"] + metodo,
+                           capture_output=True, text=True, timeout=2)
+    except Exception:
+        return None
+    if nome is None:
+        achado = r.stdout.strip().split("'")
+        return achado[1] if len(achado) > 1 and achado[1] else None
+    # o Konsole aplica a troca mas responde "AccessDenied" (API sensível desligada); quem confirma é o tamanho
+    return True
+
+
+def perfil_padrao_konsole():
+    try:
+        with open(os.path.expanduser("~/.config/konsolerc")) as f:
+            for linha in f:
+                if linha.startswith("DefaultProfile="):
+                    return linha.split("=", 1)[1].strip().removesuffix(".profile") or None
+    except OSError:
+        pass
+    return None
+
+
+def tela_bloqueada():
+    try:
+        r = subprocess.run(["busctl", "--user", "call", "org.freedesktop.ScreenSaver", "/ScreenSaver",
+                            "org.freedesktop.ScreenSaver", "GetActive"], capture_output=True, text=True, timeout=1)
+        return "true" in r.stdout
+    except Exception:
+        return False
+
+
+def bench():
+    w, h = 174, 49
+    ch, co = [" "] * (w * h), [0] * (w * h)
+    for cls in CENAS:
+        c = cls("verde")
+        c.resize(w, h)
+        t0 = time.perf_counter()
+        for f in range(60):
+            c.draw(f / FPS, 1 / FPS, ch, co)
+            render(ch, co, w, h)
+        print("%-12s %5.1f ms/quadro" % (cls.__name__, (time.perf_counter() - t0) / 60 * 1000))
+
+
+# ------------------------------------------------ vídeo pra tela de bloqueio (--video)
+
+# perfil -> (colunas, linhas, largura e altura da célula em px, tamanho da fonte em px), medidos no Konsole em 1920x1080
+PERFIS_VIDEO = {"normal": (174, 49, 11, 22, 18), "ScreensaverMini": (273, 83, 7, 13, 11)}
+def _achar_fonte_video():
+    """Hack Nerd Font Mono se estiver instalada; senão a monoespaçada que o fontconfig achar."""
+    padrao = os.path.expanduser("~/.local/share/fonts/HackNerdFont/HackNerdFontMono-Regular.ttf")
+    if os.path.exists(padrao):
+        return padrao
+    for nome in ("Hack Nerd Font Mono", "Hack", "monospace"):
+        try:
+            r = subprocess.run(["fc-match", "-f", "%{file}", nome], capture_output=True, text=True, timeout=5)
+            if r.stdout.strip() and os.path.exists(r.stdout.strip()):
+                return r.stdout.strip()
+        except Exception:
+            pass
+    return padrao
+
+
+FONTE_VIDEO = _achar_fonte_video()
+
+
+class Rasterizador:
+    """Desenha a grade de células (ch, co) numa imagem 1920x1080 do jeito que o Konsole mostra."""
+
+    def __init__(self, largura=1920, altura=1080):
+        from PIL import Image, ImageDraw, ImageFont
+        self.Image, self.ImageDraw, self.ImageFont = Image, ImageDraw, ImageFont
+        self.L, self.A = largura, altura
+        self.fontes, self.mascaras, self.arquivos = {}, {}, {}
+
+    def fonte(self, arq, px):
+        if (arq, px) not in self.fontes:
+            self.fontes[(arq, px)] = self.ImageFont.truetype(arq, px)
+        return self.fontes[(arq, px)]
+
+    def tem_glifo(self, f, c):
+        m, vazio = f.getmask(c), f.getmask("\uffff")
+        return m.size != vazio.size or bytes(m) != bytes(vazio)
+
+    def arquivo_para(self, c, px):
+        if c not in self.arquivos:
+            escolhido = FONTE_VIDEO
+            if not self.tem_glifo(self.fonte(FONTE_VIDEO, px), c):
+                try:
+                    r = subprocess.run(["fc-list", f":charset={ord(c):x}", "file"], capture_output=True, text=True, timeout=5)
+                    arqs = sorted({l.split(":")[0] for l in r.stdout.splitlines() if l.strip()},
+                                  key=lambda a: ("Mono" not in a, not a.endswith((".ttf", ".otf")), a))
+                except Exception:
+                    arqs = []
+                for arq in arqs:
+                    try:
+                        if self.tem_glifo(self.fonte(arq, px), c):
+                            escolhido = arq
+                            break
+                    except Exception:
+                        continue
+            self.arquivos[c] = escolhido
+        return self.arquivos[c]
+
+    def mascara(self, c, cw, chh, px):
+        chave = (c, cw, chh, px)
+        if chave not in self.mascaras:
+            f = self.fonte(self.arquivo_para(c, px), px)
+            im = self.Image.new("L", (cw, chh), 0)
+            asc, desc = f.getmetrics()
+            self.ImageDraw.Draw(im).text(((cw - f.getlength(c)) / 2, (chh - asc - desc) / 2), c, font=f, fill=255)
+            self.mascaras[chave] = im
+        return self.mascaras[chave]
+
+    def quadro(self, ch, co, w, h, perfil):
+        return self.imagem(ch, co, w, h, perfil).tobytes()
+
+    def parede(self):
+        """Wallpaper atual (o que a tela de bloqueio usava), cortado pra preencher 1920x1080."""
+        try:
+            r = subprocess.run(["kreadconfig6", "--file", "kscreenlockerrc", "--group", "Greeter", "--group", "Wallpaper",
+                                "--group", "org.kde.image", "--group", "General", "--key", "Image"],
+                               capture_output=True, text=True, timeout=5)
+            im = self.Image.open(r.stdout.strip().removeprefix("file://")).convert("RGB")
+        except Exception:
+            return None
+        esc = max(self.L / im.width, self.A / im.height)
+        im = im.resize((int(im.width * esc + 0.5), int(im.height * esc + 0.5)), self.Image.LANCZOS)
+        x0, y0 = (im.width - self.L) // 2, (im.height - self.A) // 2
+        return im.crop((x0, y0, x0 + self.L, y0 + self.A))
+
+    def imagem(self, ch, co, w, h, perfil):
+        from array import array
+        _c, _l, cw, chh, px = PERFIS_VIDEO[perfil]
+        camada = array("I", bytes(4 * w * 2 * h))
+        texto = []
+        for y in range(h):
+            base, cima = y * w, 2 * y * w
+            baixo = cima + w
+            for x in range(w):
+                c = ch[base + x]
+                if c == " ":
+                    continue
+                k = co[base + x]
+                fg = k & 0xFFFFFF
+                bg = (k >> 24) & 0xFFFFFF if k & BG else 0
+                if c == "█":
+                    camada[cima + x] = camada[baixo + x] = fg
+                elif c == "▀":
+                    camada[cima + x], camada[baixo + x] = fg, bg
+                elif c == "▄":
+                    camada[cima + x], camada[baixo + x] = bg, fg
+                else:
+                    if bg:
+                        camada[cima + x] = camada[baixo + x] = bg
+                    texto.append((x, y, c, fg))
+        img = self.Image.frombytes("RGBX", (w, 2 * h), camada.tobytes(), "raw", "BGRX").convert("RGB")
+        img = img.resize((w * cw, h * chh), self.Image.NEAREST)
+        tela = self.Image.new("RGB", (self.L, self.A))
+        tela.paste(img, (0, 0))
+        for x, y, c, fg in texto:
+            tela.paste(((fg >> 16) & 255, (fg >> 8) & 255, fg & 255), (x * cw, y * chh), self.mascara(c, cw, chh, px))
+        return tela
+
+
+def gerar_video(saida, minutos=25.0, fps=30):
+    """Roda o mesmo rodízio de cenas sem terminal e grava um vídeo 1920x1080 (começa e termina no preto, pra emendar)."""
+    ras = Rasterizador()
+    parcial = saida + ".parcial.mp4"
+    ff = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "1920x1080",
+                           "-r", str(fps), "-i", "-", "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "26",
+                           "-tune", "animation", "-pix_fmt", "yuv420p", "-movflags", "+faststart", parcial],
+                          stdin=subprocess.PIPE)
+
+    def perfil_de(cena):
+        return getattr(cena, "perfil", None) or "normal"
+
+    dt, total = 1 / fps, int(minutos * 60 * fps)
+    fim_escuro = total + 1
+    atual, pendente, encerrando = sortear_cena(), None, False
+    perfil = perfil_de(atual)
+    w, h = PERFIS_VIDEO[perfil][:2]
+    atual.resize(w, h)
+    prox = None
+    A_ch, A_co, B_ch, B_co = [" "] * (w * h), [0] * (w * h), [" "] * (w * h), [0] * (w * h)
+    mask, cor_borda = mascara(w, h), 0xB0FFB0
+    t_atual = t_prox = 0.0
+    troca = random.uniform(*atual.duracao)
+    extras = Extras()
+    parede = ras.parede()
+    funde = int(3 * fps)
+    if parede is not None:
+        bruto = parede.tobytes()
+        for _ in range(int(60 * fps)):
+            ff.stdin.write(bruto)
+    inicio = time.monotonic()
+    for f in range(total):
+        t_atual += dt
+        atual.draw(t_atual, dt, A_ch, A_co)
+        if prox:
+            t_prox += dt
+            prox.draw(t_prox, dt, B_ch, B_co)
+            p = t_prox / TRANSICAO * 1.15 - 0.05
+            borda = p - 0.07
+            for i in range(w * h):
+                m = mask[i]
+                if m < borda:
+                    A_ch[i], A_co[i] = B_ch[i], B_co[i]
+                elif m < p:
+                    A_ch[i], A_co[i] = random.choice(GLITCH), cor_borda
+            if t_prox >= TRANSICAO:
+                atual, t_atual, prox = prox, t_prox, None
+                troca = t_atual + random.uniform(*atual.duracao)
+                if pendente is not None and isinstance(atual, Preto):
+                    perfil = perfil_de(pendente)
+                    w, h = PERFIS_VIDEO[perfil][:2]
+                    A_ch, A_co, B_ch, B_co = [" "] * (w * h), [0] * (w * h), [" "] * (w * h), [0] * (w * h)
+                    atual.resize(w, h)
+                    pendente.resize(w, h)
+                    prox, pendente, t_prox = pendente, None, 0.0
+                    mask = mascara(w, h)
+        elif f >= fim_escuro and not encerrando:
+            encerrando = True
+            prox, t_prox = Preto(), 0.0
+            prox.resize(w, h)
+            mask = mascara(w, h)
+        elif t_atual >= troca and not encerrando:
+            nova = sortear_cena(atual)
+            if perfil_de(nova) != perfil:
+                pendente, prox = nova, Preto()
+            else:
+                prox = nova
+            prox.resize(w, h)
+            t_prox = 0.0
+            mask = mascara(w, h)
+            cor_borda = random.choice((0xB0FFB0, 0x80FFD0, 0xFFFFFF))
+        extras.quadro(atual, t_atual, dt, A_ch, A_co, w, h)
+        img = ras.imagem(A_ch, A_co, w, h, perfil)
+        if parede is not None and f < funde:
+            img = ras.Image.blend(parede, img, f / funde)
+        elif parede is not None and f >= total - funde:
+            img = ras.Image.blend(img, parede, (f - (total - funde)) / funde)
+        ff.stdin.write(img.tobytes())
+        if f % (fps * 60) == 0:
+            gasto = time.monotonic() - inicio
+            print(f"{f // fps // 60:3d}/{minutos:.0f} min de vídeo, {gasto / 60:.1f} min gastos", flush=True)
+    ff.stdin.close()
+    ff.wait()
+    if ff.returncode != 0:
+        raise SystemExit("ffmpeg falhou")
+    os.replace(parcial, saida)
+    print("pronto:", saida, os.path.getsize(saida) // (1024 * 1024), "MB")
+
+
+def main():
+    fd = sys.stdin.fileno()
+    antigo = termios.tcgetattr(fd)
+    saida = sys.stdout
+    perfil_inicial = None
+    if os.environ.get("KONSOLE_DBUS_SESSION"):
+        perfil_inicial = os.environ.get("SCREENSAVER_PERFIL") or perfil_konsole() or perfil_padrao_konsole()
+    perfil_atual = perfil_inicial
+
+    def perfil_de(cena):
+        return getattr(cena, "perfil", None) or perfil_inicial
+
+    def trocar_perfil(nome):
+        """Troca o perfil (fonte) e espera o terminal mudar de tamanho. Devolve o tamanho novo."""
+        nonlocal perfil_atual
+        antes = os.get_terminal_size()
+        if perfil_inicial and nome and nome != perfil_atual and perfil_konsole(nome):
+            perfil_atual = nome
+            fim_ = time.monotonic() + 1.5
+            while time.monotonic() < fim_ and os.get_terminal_size() == antes:
+                time.sleep(0.05)
+            time.sleep(0.1)
+        return os.get_terminal_size()
+
+    def cabe(cena, tam_):
+        mn = getattr(cena, "min_px", None)
+        return not mn or (tam_.columns >= mn[0] and 2 * tam_.lines >= mn[1])
+
+    try:
+        tty.setcbreak(fd)
+        saida.write("\x1b]0;screensaver-ascii\x07\x1b[?1049h\x1b[?25l\x1b[2J")
+        saida.flush()
+        tam = None
+        forcar = sys.argv[sys.argv.index("--cena") + 1] if "--cena" in sys.argv else None
+        forcar_prox = sys.argv[sys.argv.index("--proxima") + 1] if "--proxima" in sys.argv else None
+        dur_teste = float(os.environ["SS_DURACAO"]) if os.environ.get("SS_DURACAO") else None
+        atual = globals()[forcar]("verde") if forcar else sortear_cena()
+        if perfil_de(atual) != perfil_atual:
+            if not cabe(atual, trocar_perfil(perfil_de(atual))) and not forcar:
+                trocar_perfil(perfil_inicial)
+                atual = Matrix("verde")
+        prox = pendente = None
+        extras = Extras()
+        t_atual = t_prox = 0.0
+        troca = dur_teste or random.uniform(*atual.duracao)
+        ultimo = time.monotonic()
+        checar_lock = ultimo + 2
+        while True:
+            agora = time.monotonic()
+            dt = min(0.1, agora - ultimo)
+            ultimo = agora
+            novo_tam = os.get_terminal_size()
+            if novo_tam != tam:
+                tam = novo_tam
+                w, h = tam.columns, tam.lines
+                A_ch, A_co = [" "] * (w * h), [0] * (w * h)
+                B_ch, B_co = [" "] * (w * h), [0] * (w * h)
+                atual.resize(w, h)
+                if prox:
+                    prox.resize(w, h)
+                    mask = mascara(w, h)
+                saida.write("\x1b[2J")
+            t_atual += dt
+            atual.draw(t_atual, dt, A_ch, A_co)
+            if prox:
+                t_prox += dt
+                prox.draw(t_prox, dt, B_ch, B_co)
+                p = t_prox / TRANSICAO * 1.15 - 0.05
+                borda = p - 0.07
+                for i in range(w * h):
+                    m = mask[i]
+                    if m < borda:
+                        A_ch[i], A_co[i] = B_ch[i], B_co[i]
+                    elif m < p:
+                        A_ch[i], A_co[i] = random.choice(GLITCH), cor_borda
+                if t_prox >= TRANSICAO:
+                    atual, t_atual, prox = prox, t_prox, None
+                    troca = t_atual + (dur_teste or random.uniform(*atual.duracao))
+                    if pendente is not None and isinstance(atual, Preto):
+                        # tela já está preta: troca a fonte e entra na cena nova com o dissolve normal
+                        tam_novo = trocar_perfil(perfil_de(pendente))
+                        if not cabe(pendente, tam_novo):
+                            trocar_perfil(perfil_inicial)
+                            pendente = sortear_cena(pendente)
+                            while perfil_de(pendente) != perfil_inicial:
+                                pendente = sortear_cena(pendente)
+                        prox, pendente = pendente, None
+                        tam = None
+                        t_prox = 0.0
+                        cor_borda = random.choice((0xB0FFB0, 0x80FFD0, 0xFFFFFF))
+                        continue
+            elif t_atual >= troca and not forcar:
+                nova = globals()[forcar_prox]("verde") if forcar_prox else sortear_cena(atual)
+                forcar_prox = None
+                if perfil_de(nova) != perfil_atual:
+                    pendente, prox = nova, Preto()
+                else:
+                    prox = nova
+                prox.resize(w, h)
+                t_prox = 0.0
+                mask = mascara(w, h)
+                cor_borda = random.choice((0xB0FFB0, 0x80FFD0, 0xFFFFFF))
+            extras.quadro(atual, t_atual, dt, A_ch, A_co, w, h)
+            saida.write(render(A_ch, A_co, w, h))
+            saida.flush()
+            if agora >= checar_lock:
+                checar_lock = agora + 2
+                if tela_bloqueada():
+                    if os.environ.get("SS_DEBUG"):
+                        print("saiu: tela bloqueada", file=sys.stderr)
+                    return
+            espera = max(0.0, 1 / FPS - (time.monotonic() - agora))
+            if select.select([fd], [], [], espera)[0]:
+                if os.environ.get("SS_DEBUG"):
+                    print("saiu: stdin", repr(os.read(fd, 64)), file=sys.stderr)
+                return
+    except KeyboardInterrupt:
+        pass
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, antigo)
+        saida.write("\x1b[0m\x1b[?25h\x1b[?1049l")
+        saida.flush()
+        if perfil_inicial and perfil_atual != perfil_inicial:
+            perfil_konsole(perfil_inicial)
+
+
+if __name__ == "__main__":
+    if "--video" in sys.argv:
+        arg = sys.argv[sys.argv.index("--video") + 1]
+        mins = float(sys.argv[sys.argv.index("--minutos") + 1]) if "--minutos" in sys.argv else 25.0
+        gerar_video(os.path.abspath(os.path.expanduser(arg)), mins)
+    elif "--bench" in sys.argv:
+        bench()
+    else:
+        main()

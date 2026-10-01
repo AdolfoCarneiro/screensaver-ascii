@@ -1,0 +1,9 @@
+# cache de sprites (baixado na máquina de cada um) e vídeos gerados
+pokemon.json
+*.mp4
+*.parcial.mp4
+# backups
+*.bak*
+*~
+__pycache__/
+*.pyc

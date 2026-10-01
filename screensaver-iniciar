@@ -1,0 +1,16 @@
+#!/bin/bash
+# Chamado pelo swayidle quando o PC fica ocioso.
+PIDF="${XDG_RUNTIME_DIR:-/tmp}/screensaver.pid"
+[ -f "$PIDF" ] && kill -0 "$(cat "$PIDF")" 2>/dev/null && exit 0
+SCREENSAVER_PERFIL=Screensaver \
+  konsole --profile Screensaver --fullscreen --hide-menubar --hide-toolbars --hide-tabbar \
+  -e "$HOME/.local/bin/screensaver-ascii" &
+echo $! > "$PIDF"
+# aproveita que você saiu de perto: se o vídeo da tela de bloqueio tem mais de 20h, gera um novo (prioridade mínima).
+# Só acontece se o vídeo foi configurado (instalar.sh --bloqueio instala o screensaver-video.service).
+if [ -f "$HOME/.config/systemd/user/screensaver-video.service" ]; then
+  VID="$HOME/.local/share/screensaver-ascii/bloqueio.mp4"
+  if [ ! -f "$VID" ] || [ -n "$(find "$VID" -mmin +1200)" ]; then
+    systemctl --user start --no-block screensaver-video.service
+  fi
+fi
