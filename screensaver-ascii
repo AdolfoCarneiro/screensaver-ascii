@@ -2067,6 +2067,8 @@ class Pokemon(Cena):
                               self.tremor * self.k)
 
 
+# pixels do logo do Clawd; lá cada pixel é um quadrante (2x mais alto que largo),
+# então desenha com escala vertical dobrada (ey = 2 * esc).
 CLAWD = ["...############...",
          "...##.######.##...",
          ".################.",
@@ -2100,16 +2102,18 @@ def blit(ch, co, w, h, pixels):
             ch[i], co[i] = "▄", b
 
 
-def arte_pixels(arte, x0, y0, esc, cores, px=None):
-    """Arte (lista de strings) -> {(x, py): cor}; cores mapeia caractere -> cor."""
+def arte_pixels(arte, x0, y0, esc, cores, px=None, ey=None):
+    """Arte (lista de strings) -> {(x, py): cor}; cores mapeia caractere -> cor.
+    ey é a escala vertical (padrão: igual à horizontal)."""
     px = {} if px is None else px
+    ey = esc if ey is None else ey
     for ay, linha in enumerate(arte):
         for ax, s in enumerate(linha):
             c = cores.get(s)
             if c:
-                traco = y0 + ay * esc + esc - 1 - esc // 3
-                for yy in range(y0 + ay * esc, y0 + ay * esc + esc):
-                    cc = c if s != "e" or esc == 1 or yy == traco else cores.get("#", c)
+                traco = y0 + ay * ey + ey - 1 - ey // 3
+                for yy in range(y0 + ay * ey, y0 + ay * ey + ey):
+                    cc = c if s != "e" or ey == 1 or yy == traco else cores.get("#", c)
                     for xx in range(x0 + ax * esc, x0 + ax * esc + esc):
                         px[(xx, yy)] = cc
     return px
@@ -2122,10 +2126,10 @@ class Clawd(Cena):
     duracao = (45, 60)
     LARANJA = 0xD97757
     SPIN = "·✢✳✶✻✽✻✶✳✢"
-    VERBOS = ["Clauding", "Pondering", "Osmosing", "Churning", "Noodling", "Percolating", "Cogitating",
-              "Vibing", "Brewing", "Conjuring", "Moseying", "Spelunking", "Wrangling", "Finagling",
-              "Schlepping", "Honking", "Marinating", "Simmering", "Debugging", "Bug-hunting", "Refactoring"]
-    FALAS_PEGOU = ["You're absolutely right!", "You're absolutely right!", "Achei o bug!", "Corrigido ✓",
+    VERBOS = ["Claudando", "Ponderando", "Osmosando", "Matutando", "Maquinando", "Percolando", "Cogitando",
+              "Vibrando", "Fermentando", "Conjurando", "Perambulando", "Espeleologando", "Domando", "Gambiarrando",
+              "Ruminando", "Buzinando", "Marinando", "Cozinhando", "Depurando", "Caçando bugs", "Refatorando"]
+    FALAS_PEGOU = ["Você tem toda razão!", "Você tem toda razão!", "Achei o bug!", "Corrigido ✓",
                    "Mais um!", "Era um off-by-one.", "Faltava um await.", "Era só um typo.", "null de novo...",
                    "Quem escreveu isso? Ah, fui eu.", "Nada que um print não resolva.", "Race condition. Clássico."]
     FALAS_ERROU = ["Quase!", "Volta aqui!", "Hmm, escorregou.", "Deixa eu reler o stack trace..."]
@@ -2143,7 +2147,7 @@ class Clawd(Cena):
 
     def iniciar(self):
         w, h = self.w, self.h
-        self.esc = 3 if w >= 110 and h >= 36 else 2
+        self.esc = 2 if w >= 90 and h >= 30 else 1
         self.cw = 18 * self.esc
         self.chao = h - 3
         self.mini_rola = rola_pixels(0.12)
@@ -2174,6 +2178,7 @@ class Clawd(Cena):
 
     def novo_bug(self, dentro=False):
         voa = random.random() < 0.3
+        rola = not any(b["rola"] for b in self.bugs) and random.random() < (0.5 if OVOS else 0.06)
         v = random.uniform(4, 9) * random.choice((-1, 1))
         if dentro:
             x = random.uniform(0, self.w - 9)
@@ -2181,7 +2186,7 @@ class Clawd(Cena):
             x = -9.0 if v > 0 else float(self.w)
         self.bugs.append({"x": x, "v": v, "voa": voa, "alt": random.uniform(5, 10) if voa else 0.0,
                           "cor": random.choice(self.CORES_BUG), "fase": random.uniform(0, 6),
-                          "vira": random.uniform(1, 4), "rola": random.random() < (0.5 if OVOS else 0.06)})
+                          "vira": random.uniform(1, 4), "rola": rola})
 
     def falar(self, txt):
         self.fala, self.fala_t = txt, self.t
@@ -2382,8 +2387,8 @@ class Clawd(Cena):
         arte[1] = "".join(olhos)
         if self.andando and int(t * 9) % 2:
             arte[4] = CLAWD_PASSO
-        y0 = 2 * self.chao + 2 - 5 * s - int(self.pulo_px)
-        blit(ch, co, w, h, arte_pixels(arte, int(self.x), y0, s, {"#": self.LARANJA}))
+        y0 = 2 * self.chao + 2 - 10 * s - int(self.pulo_px)
+        blit(ch, co, w, h, arte_pixels(arte, int(self.x), y0, s, {"#": self.LARANJA}, ey=2 * s))
 
     def desenhar_particulas(self, t, dt, ch, co):
         w, h = self.w, self.h
@@ -2414,7 +2419,7 @@ class Clawd(Cena):
 
     def desenhar_baloes(self, t, ch, co):
         w, h = self.w, self.h
-        topo = self.chao + 1 - 5 * self.esc // 2 - int(self.pulo_px) // 2
+        topo = self.chao + 1 - 5 * self.esc - int(self.pulo_px) // 2
         meio = int(self.x + self.cw / 2)
         if self.pensando:
             verbo, t0 = self.pensando
@@ -2432,7 +2437,7 @@ class Clawd(Cena):
             txt = self.fala
             x1 = max(0, min(w - len(txt) - 5, meio - len(txt) // 2 - 2))
             self.caixa(ch, co, x1, topo - 5, x1 + len(txt) + 3, topo - 3, 0x8A8A8A)
-            c = self.LARANJA if txt.startswith("You're") else 0xE6E6E6
+            c = self.LARANJA if txt.startswith("Você tem") else 0xE6E6E6
             escrever(ch, co, w, h, x1 + 2, topo - 4, txt[:n], c)
             escrever(ch, co, w, h, meio, topo - 2, "╲" if meio > x1 + 2 else "╱", 0x8A8A8A)
 
@@ -2468,12 +2473,12 @@ class ClawdSoneca(Cena):
     combinavel = False
     peso = 0.7
     duracao = (35, 50)
-    FALAS = ["hm?", "✻ que lindo…", "…só mais 5 minutinhos…", "zzz… refatora… zzz", "sonhei com um bug",
-             "já acordei, já acordei", "era um meteoro ou um deploy?"]
+    FALAS = ["hm?", "✻ so pretty…", "…just 5 more minutes…", "zzz… refactor… zzz", "dreamt about a bug",
+             "I'm up, I'm up", "was that a meteor or a deploy?"]
 
     def iniciar(self):
         w, h = self.w, self.h
-        self.esc = 4 if w >= 120 and h >= 40 else 2
+        self.esc = 3 if w >= 120 and h >= 45 else 2 if h >= 24 else 1
         self.cw = 18 * self.esc
         self.chao = h - 4
         self.x = max(0, min(w - self.cw, (w - self.cw) // 2 + random.randint(-w // 6, w // 6)))
@@ -2538,9 +2543,9 @@ class ClawdSoneca(Cena):
                 escrever(ch, co, w, h, int(v[0]), int(v[1]), "•", escala(0xD8FF6A, b))
         dormindo = t > self.acordado
         bob = 1 if math.sin(t * 1.6) > 0.3 else 0
-        y0 = 2 * self.chao + 2 - 5 * s - bob
+        y0 = 2 * self.chao + 2 - 10 * s - bob
         arte = arte_clawd(olhar=0 if dormindo else self.olhar, fechados=dormindo)
-        blit(ch, co, w, h, arte_pixels(arte, self.x, y0, s, CORES_CLAWD))
+        blit(ch, co, w, h, arte_pixels(arte, self.x, y0, s, CORES_CLAWD, ey=2 * s))
         cabeca = y0 // 2
         if dormindo and t >= self.prox_z:
             self.zs.append([self.x + self.cw * 0.8, cabeca, t])
@@ -2568,7 +2573,7 @@ class ClawdFesta(Cena):
     def iniciar(self):
         w, h = self.w, self.h
         self.batida = 60 / random.choice((108, 120, 128))
-        self.esc = 3 if w >= 150 and h >= 40 else 2
+        self.esc = 2 if w >= 90 and h >= 34 else 1
         cw = 18 * self.esc
         n = max(1, min(4, (w + 2) // (cw + 4)))
         gap = (w - n * cw) / (n + 1)
@@ -2639,19 +2644,19 @@ class ClawdFesta(Cena):
                     escrever(ch, co, w, h, (w - tw) // 2 + k, 1 + r, s,
                              hsv(self.hue + k / tw + nb * 0.1, 0.7, 0.7 + 0.3 * (1 - frac)))
         pisca = (t % 3.7) < 0.12
-        pes_atras = self.chao - 5 * self.esc // 2 - 3
+        pes_atras = self.chao - 5 * self.esc - 3
         for i, x in enumerate(self.atras):
             dy = max(0.0, math.sin((b * 0.5 - i * 0.12) * 2 * math.pi)) * 2
             arte = arte_clawd(fechados=pisca)
             cores = {k: escala(v, 0.55) for k, v in CORES_CLAWD.items()}
-            blit(ch, co, w, h, arte_pixels(arte, x, 2 * pes_atras + 2 - 5 - int(dy), 1, cores))
+            blit(ch, co, w, h, arte_pixels(arte, x, 2 * pes_atras + 2 - 10 - int(dy), 1, cores, ey=2))
         escrever(ch, co, w, h, 0, pes_atras + 1, "▁" * w, 0x3A2A4A)
         s = self.esc
         for i, x in enumerate(self.frente):
             dx, dy, olhar, agacha, passo = self.pose(i, b, 6)
             arte = arte_clawd(olhar=olhar, fechados=pisca, passo=passo, agachado=agacha)
-            y0 = 2 * self.chao + 2 - len(arte) * s - int(dy)
-            blit(ch, co, w, h, arte_pixels(arte, x + dx, y0, s, CORES_CLAWD))
+            y0 = 2 * self.chao + 2 - len(arte) * 2 * s - int(dy)
+            blit(ch, co, w, h, arte_pixels(arte, x + dx, y0, s, CORES_CLAWD, ey=2 * s))
         for y in range(self.chao + 1, h):
             for x in range(w):
                 tx, ty = x // 8, (y - self.chao - 1) // 2
@@ -2683,13 +2688,13 @@ class ClawdEspaco(Cena):
     combinavel = False
     peso = 0.7
     duracao = (30, 45)
-    FALAS = ["Houston, temos um bug.", "Rumo ao deploy!", "✻ Pondering the cosmos…", "Ao infinito e além do rate limit!",
-             "Isso é um buraco negro ou um memory leak?", "Uau.", "Mais rápido que um git push --force!"]
+    FALAS = ["Houston, we have a bug.", "Off to deploy!", "✻ Pondering the cosmos…", "To infinity and beyond the rate limit!",
+             "Is that a black hole or a memory leak?", "Wow.", "Faster than a git push --force!"]
 
     def iniciar(self):
         w, h = self.w, self.h
-        self.esc = 3 if w >= 120 and h >= 36 else 2
-        self.cw, self.alt = 18 * self.esc, 5 * self.esc
+        self.esc = 2 if w >= 90 and h >= 30 else 1
+        self.cw, self.alt = 18 * self.esc, 10 * self.esc
         self.x = int(w * 0.2)
         self.y = float(h)
         self.t = 0.0
@@ -2769,7 +2774,7 @@ class ClawdEspaco(Cena):
                 for _ in range(16):
                     ang = random.uniform(0, 6.3)
                     self.brilhos.append([a["x"], a["y"] / 2, math.cos(ang) * 12, math.sin(ang) * 6, "·", 0x9A9088, t])
-                self.fala, self.fala_t = "Ai!", t
+                self.fala, self.fala_t = "Ouch!", t
                 continue
             vivos.append(a)
             r = a["r"]
@@ -2820,8 +2825,8 @@ class ClawdEspaco(Cena):
             vivos.append(it)
             escrever(ch, co, w, h, int(it[0]), int(it[1] / 2), "✻", 0xFFB38A if int(t * 4) % 2 else 0xD97757)
         self.itens = vivos
-        corpo = arte_pixels(arte_clawd(olhar=1, fechados=(t % 4.1) < 0.13), self.x, int(topo), s, CORES_CLAWD)
-        for yy in range(int(topo) + s, int(topo) + 4 * s):
+        corpo = arte_pixels(arte_clawd(olhar=1, fechados=(t % 4.1) < 0.13), self.x, int(topo), s, CORES_CLAWD, ey=2 * s)
+        for yy in range(int(topo) + 2 * s, int(topo) + 8 * s):
             for xx in range(self.x - s, self.x + s):
                 corpo.setdefault((xx, yy), 0x9A9AA6)
         blit(ch, co, w, h, corpo)
@@ -3193,9 +3198,6 @@ class Labirinto(Cena):
             if g[y][x] and ((not g[y][x - 1] and not g[y][x + 1]) or (not g[y - 1][x] and not g[y + 1][x])):
                 g[y][x] = 0
         self.g = g
-        paredes = [(x, y) for y in range(1, n - 1) for x in range(1, n - 1)
-                   if g[y][x] and any(not g[y + dy][x + dx] for dx, dy in self.DIRS)]
-        self.grafite = set(random.sample(paredes, min(5, len(paredes))))
         self.cel = (1, 1)
         self.d = 0 if not g[1][2] else 1
         self.pos = [1.5, 1.5]
@@ -3281,7 +3283,6 @@ class Labirinto(Cena):
             yt, yb = int(topo), int(base)
             v = clamp(1.6 / (dist + 0.6)) * (0.7 if lado else 1.0)
             borda = wx < 0.035 or wx > 0.965
-            pichada = (mx, my) in self.grafite and alt > 6
             for y in range(h):
                 i = y * w + x
                 if y < yt or y > yb:
@@ -3307,11 +3308,6 @@ class Labirinto(Cena):
                     else:
                         ch[i] = " "
                     continue
-                if pichada:
-                    r = rola_regiao((wx * 1.3 - 0.15) * 76, ((y + 0.5 - topo) / alt * 1.15 - 0.075) * 92)
-                    if r:
-                        ch[i], co[i] = "█", escala(ROLA_CORES[r[0]][1] if tema == "tijolo" else 0xFF4FD8, 0.35 + 0.65 * v)
-                        continue
                 if tema == "tijolo":
                     c = escala(aresta, v)
                     s = "░▒▓█"[min(3, int(v * 4))]

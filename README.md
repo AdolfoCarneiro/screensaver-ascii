@@ -85,6 +85,9 @@ ambiente (ou no comando do hypridle/swayidle). A janela abre em tela cheia, opac
 (~174x49 células em 1080p; mude com `SCREENSAVER_FONTE=12`) e com a classe/app-id **`screensaver-ascii`** (no
 ghostty é `io.github.screensaver-ascii`, porque lá precisa ser um ID de aplicativo GTK).
 
+No KDE abre um terminal **por monitor**, cada um sorteando as próprias cenas (um script temporário do KWin manda
+cada janela pro seu monitor). Pra voltar a ser um só, use `SCREENSAVER_MONITORES=1`.
+
 ### A cena de Pokémon em cada terminal
 
 A batalha roda na resolução do GBA, então precisa de uma grade de pelo menos **240x80 células** (240x160 "pixels"
@@ -257,7 +260,8 @@ Install: `./instalar.sh` (`--pokemon` downloads sprites from PokeAPI on your own
 KDE-only lock-screen video; `--hypridle`/`--swayidle` pick the idle trigger; `--desinstalar` removes it). The
 installer detects pacman/dnf/apt and offers the right package names (it always asks before running `sudo`).
 Requires `python3`, `swayidle` or `hypridle`, and one of Konsole, Alacritty, kitty, ghostty, foot or wezterm
-(`SCREENSAVER_TERMINAL=…` forces one; the window class/app-id is `screensaver-ascii`). Hack Nerd Font Mono is
+(`SCREENSAVER_TERMINAL=…` forces one; the window class/app-id is `screensaver-ascii`). On KDE it opens one
+terminal per monitor, each picking its own scenes (`SCREENSAVER_MONITORES=1` for a single one). Hack Nerd Font Mono is
 recommended. Code and comments are in Portuguese.
 
 **Distros:** Fedora + KDE is the tested setup. CachyOS with KDE works the same way (Konsole + swayidle). On Hyprland

@@ -5,8 +5,9 @@
 # no KDE (se tiver) e, fora dele, o primeiro que achar entre alacritty, kitty, ghostty, foot e wezterm.
 # A janela sai com a classe/app-id "screensaver-ascii" (pra regras de janela do Hyprland, por exemplo).
 # SCREENSAVER_FONTE muda o tamanho da fonte (padrão 14, que dá ~174x49 células em 1920x1080).
+# No KDE abre um terminal por monitor (cada um sorteia as próprias cenas); SCREENSAVER_MONITORES=1 volta a ser um só.
 PIDF="${XDG_RUNTIME_DIR:-/tmp}/screensaver.pid"
-[ -f "$PIDF" ] && kill -0 "$(cat "$PIDF")" 2>/dev/null && exit 0
+[ -f "$PIDF" ] && kill -0 "$(head -n1 "$PIDF")" 2>/dev/null && exit 0
 # tela já bloqueada (hyprlock/swaylock)? não abre nada por cima
 pidof hyprlock swaylock >/dev/null 2>&1 && exit 0
 
@@ -43,6 +44,7 @@ LIMPO=(env -u KONSOLE_DBUS_SERVICE -u KONSOLE_DBUS_SESSION -u KONSOLE_DBUS_WINDO
        -u KITTY_LISTEN_ON -u KITTY_WINDOW_ID -u KITTY_PID -u ALACRITTY_SOCKET -u ALACRITTY_WINDOW_ID
        -u ALACRITTY_LOG -u WEZTERM_PANE -u WEZTERM_UNIX_SOCKET SCREENSAVER_FONTE="$FONTE")
 
+abrir() {
 case "$TERMINAL" in
   konsole)
     # a fonte fica no perfil Screensaver (konsole/Screensaver.profile); a da cena de Pokémon no ScreensaverMini
@@ -95,7 +97,58 @@ case "$TERMINAL" in
     exit 1
     ;;
 esac
-echo $! > "$PIDF"
+}
+
+# KDE: quantos monitores ligados (sem kscreen-doctor, fica um só)
+contar_monitores() {
+  tem kscreen-doctor || { echo 1; return; }
+  kscreen-doctor -j 2>/dev/null | python3 -c '
+import json, sys
+try:
+    print(max(1, sum(1 for o in json.load(sys.stdin)["outputs"] if o.get("enabled") and o.get("connected"))))
+except Exception:
+    print(1)' 2>/dev/null || echo 1
+}
+
+# KDE: script do KWin que manda a janela de cada PID pro seu monitor, em tela cheia
+espalhar_kde() {
+  local js="${XDG_RUNTIME_DIR:-/tmp}/screensaver-kwin.js" nome="screensaver-ascii-monitores" id
+  cat > "$js" <<JS
+const pids = [$(IFS=,; echo "${PIDS[*]}")];
+function arrumar(w) {
+    const i = pids.indexOf(w.pid);
+    if (i < 0 || !w.normalWindow) return;
+    const telas = workspace.screens;
+    w.fullScreen = false;
+    workspace.sendClientToScreen(w, telas[i % telas.length]);
+    w.fullScreen = true;
+}
+workspace.windowList().forEach(arrumar);
+workspace.windowAdded.connect(arrumar);
+JS
+  gdbus call --session --dest org.kde.KWin --object-path /Scripting \
+    --method org.kde.kwin.Scripting.unloadScript "$nome" >/dev/null 2>&1
+  id=$(gdbus call --session --dest org.kde.KWin --object-path /Scripting \
+    --method org.kde.kwin.Scripting.loadScript "$js" "$nome" 2>/dev/null | grep -o '[0-9]\+' | head -n1)
+  [ -n "$id" ] || return
+  gdbus call --session --dest org.kde.KWin --object-path "/Scripting/Script$id" \
+    --method org.kde.kwin.Script.run >/dev/null 2>&1
+  # as janelas abrem em poucos segundos; depois disso o script não precisa mais ficar carregado
+  ( sleep 15; gdbus call --session --dest org.kde.KWin --object-path /Scripting \
+      --method org.kde.kwin.Scripting.unloadScript "$nome" >/dev/null 2>&1 ) &
+}
+
+N=1
+case "${XDG_CURRENT_DESKTOP:-}" in
+  *KDE*) tem gdbus && N="${SCREENSAVER_MONITORES:-$(contar_monitores)}" ;;
+esac
+PIDS=()
+for _ in $(seq "$N"); do
+  abrir
+  PIDS+=($!)
+done
+printf '%s\n' "${PIDS[@]}" > "$PIDF"
+[ "$N" -gt 1 ] && espalhar_kde
 
 # Hyprland: se a janela não abriu em tela cheia sozinha (wezterm), põe ela em tela cheia
 if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && tem hyprctl && [ "$TERMINAL" = wezterm ]; then
