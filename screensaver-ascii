@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Screensaver ASCII: várias animações que se dissolvem umas nas outras.
 
-Roda dentro do Konsole em tela cheia. Sai com qualquer tecla (ou quando a
-tela é bloqueada). `screensaver-ascii --bench` mede o custo de cada cena e
-`screensaver-ascii --cena Nome` fixa uma cena só (pra testar).
+Roda dentro de um terminal em tela cheia (Konsole, kitty, Alacritty, foot,
+ghostty, wezterm…). Sai com qualquer tecla (ou quando a tela é bloqueada).
+`screensaver-ascii --bench` mede o custo de cada cena e `screensaver-ascii
+--cena Nome` fixa uma cena só (pra testar).
 """
 import colorsys
 import json
@@ -3674,7 +3675,165 @@ def perfil_padrao_konsole():
     return None
 
 
+# ------------------------------------------------ fonte do terminal (cena de Pokémon)
+# A cena de Pokémon roda na resolução do GBA: precisa de uma grade de pelo menos 240x80 células
+# (240x160 "pixels" em meio-bloco). Cada terminal tem (ou não) um jeito de diminuir a fonte com o programa
+# rodando. Quem não tem só mostra a cena se o terminal já for grande o bastante (senão ela é pulada).
+
+MIN_COLUNAS, MIN_LINHAS = 240, 80
+
+
+def esperar_tamanho(antes, limite=1.5):
+    """Espera o terminal mudar de tamanho (depois de trocar a fonte). Devolve o tamanho novo."""
+    fim_ = time.monotonic() + limite
+    while time.monotonic() < fim_ and os.get_terminal_size() == antes:
+        time.sleep(0.05)
+    time.sleep(0.1)
+    return os.get_terminal_size()
+
+
+class Terminal:
+    """Terminal que não sabe trocar a fonte (foot, ghostty, wezterm…): inicial=None desliga a troca."""
+    nome = "outro"
+    inicial = None
+
+    def trocar(self, perfil, esperar=True):
+        return False
+
+
+class TermKonsole(Terminal):
+    """Konsole: troca o perfil da sessão via D-Bus (o ScreensaverMini tem fonte 8)."""
+    nome = "konsole"
+
+    def __init__(self):
+        self.inicial = os.environ.get("SCREENSAVER_PERFIL") or perfil_konsole() or perfil_padrao_konsole()
+
+    def trocar(self, perfil, esperar=True):
+        antes = os.get_terminal_size()
+        if not perfil_konsole(perfil):
+            return False
+        if esperar:
+            esperar_tamanho(antes)
+        return True
+
+
+class TermFonte(Terminal):
+    """Terminais que mudam o tamanho da fonte por comando (kitty, Alacritty). O perfil "normal" é o tamanho
+    original (SCREENSAVER_FONTE, que o screensaver-iniciar passa); qualquer outro perfil é "fonte pequena"."""
+    inicial = "normal"
+    PADRAO = 11.0   # se ninguém disse qual é o tamanho original
+    MENOR = 4.0
+
+    def __init__(self):
+        try:
+            self.original = float(os.environ.get("SCREENSAVER_FONTE") or self.PADRAO)
+        except ValueError:
+            self.original = self.PADRAO
+        self.atual = self.original
+
+    def comando(self, pt):
+        raise NotImplementedError
+
+    def aplicar(self, pt):
+        try:
+            r = subprocess.run(self.comando(pt), stdin=subprocess.DEVNULL, capture_output=True, timeout=2)
+        except Exception:
+            return False
+        if r.returncode != 0:
+            return False
+        self.atual = pt
+        return True
+
+    def trocar(self, perfil, esperar=True):
+        antes = os.get_terminal_size()
+        if perfil == self.inicial:
+            if not self.aplicar(self.original):
+                return False
+            if esperar:
+                esperar_tamanho(antes)
+            return True
+        # fonte pequena: estima o tamanho que dá 240x80 células, mede e vai descendo até caber
+        tam, pt, mudou = antes, self.atual, False
+        for _ in range(6):
+            fator = min(tam.columns / MIN_COLUNAS, tam.lines / MIN_LINHAS)
+            if fator >= 1:
+                break
+            novo = math.floor(pt * fator * 2) / 2   # de meio em meio ponto
+            if novo >= pt:
+                novo = pt - 0.5
+            if novo < self.MENOR or not self.aplicar(novo):
+                break
+            mudou = True
+            antigo, tam, pt = tam, esperar_tamanho(tam), novo
+            if tam == antigo:   # o terminal ignorou: não adianta insistir
+                break
+        return mudou or (tam.columns >= MIN_COLUNAS and tam.lines >= MIN_LINHAS)
+
+
+class TermKitty(TermFonte):
+    """kitty: `kitty @ set-font-size` (precisa de allow_remote_control; o screensaver-iniciar já liga)."""
+    nome = "kitty"
+
+    def comando(self, pt):
+        alvo = os.environ.get("KITTY_LISTEN_ON")
+        return ["kitty", "@"] + (["--to", alvo] if alvo else []) + ["set-font-size", "--", "%.1f" % pt]
+
+    def aplicar(self, pt):
+        ok = super().aplicar(pt)
+        if not os.environ.get("KITTY_LISTEN_ON"):
+            # sem socket o `kitty @` conversa pelo próprio tty: joga fora qualquer resposta que sobrar na entrada
+            try:
+                termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
+            except Exception:
+                pass
+        return ok
+
+
+class TermAlacritty(TermFonte):
+    """Alacritty >= 0.13: `alacritty msg config font.size=N` pelo socket de IPC."""
+    nome = "alacritty"
+    PADRAO = 11.25
+
+    def comando(self, pt):
+        return ["alacritty", "msg", "--socket", os.environ["ALACRITTY_SOCKET"], "config", "font.size=%.1f" % pt]
+
+
+def terminal_atual():
+    """Descobre em qual terminal o screensaver está rodando pelas variáveis que cada um põe no ambiente."""
+    if os.environ.get("KONSOLE_DBUS_SESSION") and os.environ.get("KONSOLE_DBUS_SERVICE"):
+        return TermKonsole()
+    if os.environ.get("KITTY_LISTEN_ON") or os.environ.get("KITTY_WINDOW_ID"):
+        return TermKitty()
+    if os.environ.get("ALACRITTY_SOCKET"):
+        return TermAlacritty()
+    return Terminal()
+
+
+# programas de tela de bloqueio (Hyprland, Sway…): se algum estiver rodando, a tela está bloqueada
+TRAVAS = {"hyprlock", "swaylock", "gtklock", "waylock"}
+
+
+def trava_rodando():
+    try:
+        pids = os.listdir("/proc")
+    except OSError:
+        return False
+    for pid in pids:
+        if pid.isdigit():
+            try:
+                with open("/proc/%s/comm" % pid) as f:
+                    if f.read().strip() in TRAVAS:
+                        return True
+            except OSError:
+                pass
+    return False
+
+
 def tela_bloqueada():
+    if trava_rodando():
+        return True
+    if os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        return False   # no Hyprland não tem org.freedesktop.ScreenSaver; o hyprlock já foi conferido acima
     try:
         r = subprocess.run(["busctl", "--user", "call", "org.freedesktop.ScreenSaver", "/ScreenSaver",
                             "org.freedesktop.ScreenSaver", "GetActive"], capture_output=True, text=True, timeout=1)
@@ -3910,9 +4069,8 @@ def main():
     fd = sys.stdin.fileno()
     antigo = termios.tcgetattr(fd)
     saida = sys.stdout
-    perfil_inicial = None
-    if os.environ.get("KONSOLE_DBUS_SESSION"):
-        perfil_inicial = os.environ.get("SCREENSAVER_PERFIL") or perfil_konsole() or perfil_padrao_konsole()
+    term = terminal_atual()
+    perfil_inicial = term.inicial
     perfil_atual = perfil_inicial
 
     def perfil_de(cena):
@@ -3921,13 +4079,8 @@ def main():
     def trocar_perfil(nome):
         """Troca o perfil (fonte) e espera o terminal mudar de tamanho. Devolve o tamanho novo."""
         nonlocal perfil_atual
-        antes = os.get_terminal_size()
-        if perfil_inicial and nome and nome != perfil_atual and perfil_konsole(nome):
+        if perfil_inicial and nome and nome != perfil_atual and term.trocar(nome):
             perfil_atual = nome
-            fim_ = time.monotonic() + 1.5
-            while time.monotonic() < fim_ and os.get_terminal_size() == antes:
-                time.sleep(0.05)
-            time.sleep(0.1)
         return os.get_terminal_size()
 
     def cabe(cena, tam_):
@@ -4029,7 +4182,7 @@ def main():
         saida.write("\x1b[0m\x1b[?25h\x1b[?1049l")
         saida.flush()
         if perfil_inicial and perfil_atual != perfil_inicial:
-            perfil_konsole(perfil_inicial)
+            term.trocar(perfil_inicial, esperar=False)
 
 
 if __name__ == "__main__":

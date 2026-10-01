@@ -1,5 +1,5 @@
 #!/bin/bash
-# Chamado pelo swayidle quando mexe no mouse/teclado.
+# Chamado pelo swayidle/hypridle quando mexe no mouse/teclado: fecha o terminal do screensaver.
 PIDF="${XDG_RUNTIME_DIR:-/tmp}/screensaver.pid"
 [ -f "$PIDF" ] && kill "$(cat "$PIDF")" 2>/dev/null
 rm -f "$PIDF"

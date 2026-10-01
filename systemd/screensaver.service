@@ -1,5 +1,5 @@
 [Unit]
-Description=Screensaver ASCII no Konsole quando o PC fica ocioso
+Description=Screensaver ASCII num terminal em tela cheia quando o PC fica ocioso
 PartOf=graphical-session.target
 After=graphical-session.target
 

@@ -1,11 +1,116 @@
 #!/bin/bash
-# Chamado pelo swayidle quando o PC fica ocioso.
+# Chamado pelo swayidle/hypridle quando o PC fica ocioso: abre um terminal em tela cheia rodando o screensaver.
+#
+# Terminal: SCREENSAVER_TERMINAL=konsole|alacritty|kitty|ghostty|foot|wezterm força um; senão usa o Konsole
+# no KDE (se tiver) e, fora dele, o primeiro que achar entre alacritty, kitty, ghostty, foot e wezterm.
+# A janela sai com a classe/app-id "screensaver-ascii" (pra regras de janela do Hyprland, por exemplo).
+# SCREENSAVER_FONTE muda o tamanho da fonte (padrão 14, que dá ~174x49 células em 1920x1080).
 PIDF="${XDG_RUNTIME_DIR:-/tmp}/screensaver.pid"
 [ -f "$PIDF" ] && kill -0 "$(cat "$PIDF")" 2>/dev/null && exit 0
-SCREENSAVER_PERFIL=Screensaver \
-  konsole --profile Screensaver --fullscreen --hide-menubar --hide-toolbars --hide-tabbar \
-  -e "$HOME/.local/bin/screensaver-ascii" &
+# tela já bloqueada (hyprlock/swaylock)? não abre nada por cima
+pidof hyprlock swaylock >/dev/null 2>&1 && exit 0
+
+PROG="$HOME/.local/bin/screensaver-ascii"
+CLASSE="screensaver-ascii"
+FONTE="${SCREENSAVER_FONTE:-14}"
+tem() { command -v "$1" >/dev/null 2>&1; }
+
+escolher_terminal() {
+  if [ -n "${SCREENSAVER_TERMINAL:-}" ]; then
+    echo "$SCREENSAVER_TERMINAL"
+    return
+  fi
+  case "${XDG_CURRENT_DESKTOP:-}" in
+    *KDE*) tem konsole && { echo konsole; return; } ;;
+  esac
+  for t in alacritty kitty ghostty foot wezterm konsole; do
+    tem "$t" && { echo "$t"; return; }
+  done
+}
+
+FAMILIA="monospace"
+if tem fc-list; then
+  if fc-list | grep -qi "Hack Nerd Font Mono"; then
+    FAMILIA="Hack Nerd Font Mono"
+  elif fc-list | grep -qi "Hack"; then
+    FAMILIA="Hack"
+  fi
+fi
+
+TERMINAL="$(escolher_terminal)"
+# limpa as variáveis de outro terminal (se o iniciar foi chamado de dentro de um): cada terminal põe as suas
+LIMPO=(env -u KONSOLE_DBUS_SERVICE -u KONSOLE_DBUS_SESSION -u KONSOLE_DBUS_WINDOW
+       -u KITTY_LISTEN_ON -u KITTY_WINDOW_ID -u KITTY_PID -u ALACRITTY_SOCKET -u ALACRITTY_WINDOW_ID
+       -u ALACRITTY_LOG -u WEZTERM_PANE -u WEZTERM_UNIX_SOCKET SCREENSAVER_FONTE="$FONTE")
+
+case "$TERMINAL" in
+  konsole)
+    # a fonte fica no perfil Screensaver (konsole/Screensaver.profile); a da cena de Pokémon no ScreensaverMini
+    "${LIMPO[@]}" SCREENSAVER_PERFIL=Screensaver \
+      konsole --profile Screensaver --fullscreen --hide-menubar --hide-toolbars --hide-tabbar -e "$PROG" &
+    ;;
+  alacritty)
+    "${LIMPO[@]}" alacritty --class "$CLASSE" \
+      -o 'window.startup_mode="Fullscreen"' -o 'window.decorations="None"' \
+      -o window.padding.x=0 -o window.padding.y=0 -o window.opacity=1.0 \
+      -o 'colors.primary.background="#000000"' \
+      -o "font.normal.family=\"$FAMILIA\"" -o "font.size=$FONTE" \
+      -e "$PROG" &
+    ;;
+  kitty)
+    # remote control + socket só desta janela: é por ele que a cena de Pokémon diminui a fonte
+    "${LIMPO[@]}" kitty --class "$CLASSE" --start-as=fullscreen \
+      -o allow_remote_control=yes --listen-on "unix:${XDG_RUNTIME_DIR:-/tmp}/screensaver-kitty-$$" \
+      -o background_opacity=1 -o window_padding_width=0 -o hide_window_decorations=yes \
+      -o background=#000000 -o "font_family=$FAMILIA" -o "font_size=$FONTE" \
+      -o confirm_os_window_close=0 \
+      "$PROG" &
+    ;;
+  ghostty)
+    # no Linux a classe do ghostty é um ID de aplicativo GTK (precisa de ponto)
+    "${LIMPO[@]}" ghostty --class="io.github.$CLASSE" --gtk-single-instance=false --fullscreen=true \
+      --window-decoration=false --window-padding-x=0 --window-padding-y=0 --background-opacity=1 \
+      --background=000000 --font-family="$FAMILIA" --font-size="$FONTE" --confirm-close-surface=false \
+      -e "$PROG" &
+    ;;
+  foot)
+    "${LIMPO[@]}" foot --app-id="$CLASSE" --fullscreen --font="$FAMILIA:size=$FONTE" \
+      -o pad=0x0 -o colors.background=000000 -o colors.alpha=1.0 \
+      "$PROG" &
+    ;;
+  wezterm)
+    # o wezterm não tem opção de abrir em tela cheia: no Hyprland pedimos pro compositor (mais abaixo)
+    "${LIMPO[@]}" wezterm --config "font_size=$FONTE" \
+      --config 'window_decorations="NONE"' --config 'enable_tab_bar=false' \
+      --config 'window_padding={left=0,right=0,top=0,bottom=0}' --config 'window_background_opacity=1.0' \
+      --config 'colors={background="#000000"}' --config 'window_close_confirmation="NeverPrompt"' \
+      start --always-new-process --class "$CLASSE" -- "$PROG" &
+    ;;
+  "")
+    echo "screensaver-iniciar: nenhum terminal suportado encontrado (konsole, alacritty, kitty, ghostty, foot, wezterm)" >&2
+    exit 1
+    ;;
+  *)
+    echo "screensaver-iniciar: terminal desconhecido em SCREENSAVER_TERMINAL: $TERMINAL" >&2
+    exit 1
+    ;;
+esac
 echo $! > "$PIDF"
+
+# Hyprland: se a janela não abriu em tela cheia sozinha (wezterm), põe ela em tela cheia
+if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && tem hyprctl && [ "$TERMINAL" = wezterm ]; then
+  (
+    for _ in $(seq 30); do
+      sleep 0.1
+      if hyprctl clients -j 2>/dev/null | grep -q "\"class\": \"$CLASSE\""; then
+        hyprctl dispatch focuswindow "class:^($CLASSE)\$" >/dev/null
+        hyprctl dispatch fullscreen 0 >/dev/null
+        break
+      fi
+    done
+  ) &
+fi
+
 # aproveita que você saiu de perto: se o vídeo da tela de bloqueio tem mais de 20h, gera um novo (prioridade mínima).
 # Só acontece se o vídeo foi configurado (instalar.sh --bloqueio instala o screensaver-video.service).
 if [ -f "$HOME/.config/systemd/user/screensaver-video.service" ]; then
