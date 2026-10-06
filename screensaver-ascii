@@ -666,7 +666,8 @@ class Hex(Cena):
     MSGS = ["ACCESS GRANTED", "decrypting sector", "handshake ok", "injecting payload",
             "tracing route", "bypassing firewall", "root@localhost:~#", "compiling kernel",
             "scanning ports", "uplink established", "SIGNAL LOCKED", "brute forcing hash",
-            "uploading rola.exe", "rola.exe has stopped responding", "mounting /dev/rola"]
+            "uploading rola.exe", "rola.exe has stopped responding", "mounting /dev/rola",
+            "north_london.color = RED", "scanning spurs/trophies/: 0 files found", "city.exe: 115 warnings"]
 
     def iniciar(self):
         self.addr = random.randrange(0x7F000000, 0x7FFFFFFF)
@@ -2131,7 +2132,8 @@ class Clawd(Cena):
               "Ruminando", "Buzinando", "Marinando", "Cozinhando", "Depurando", "Caçando bugs", "Refatorando"]
     FALAS_PEGOU = ["Você tem toda razão!", "Você tem toda razão!", "Achei o bug!", "Corrigido ✓",
                    "Mais um!", "Era um off-by-one.", "Faltava um await.", "Era só um typo.", "null de novo...",
-                   "Quem escreveu isso? Ah, fui eu.", "Nada que um print não resolva.", "Race condition. Clássico."]
+                   "Quem escreveu isso? Ah, fui eu.", "Nada que um print não resolva.", "Race condition. Clássico.",
+                   "Mais fácil que ganhar do Tottenham."]
     FALAS_ERROU = ["Quase!", "Volta aqui!", "Hmm, escorregou.", "Deixa eu reler o stack trace..."]
     FALAS_IDEIA = ["Já sei!", "Hmm... achei.", "Eureka!", "Ok, tenho um plano.", "Deixa comigo."]
     CORES_BUG = [0xFF5C5C, 0x7CFC7C, 0xB07CFF, 0xFFC857, 0x5CC8FF]
@@ -2474,7 +2476,7 @@ class ClawdSoneca(Cena):
     peso = 0.7
     duracao = (35, 50)
     FALAS = ["hm?", "✻ so pretty…", "…just 5 more minutes…", "zzz… refactor… zzz", "dreamt about a bug",
-             "I'm up, I'm up", "was that a meteor or a deploy?"]
+             "I'm up, I'm up", "was that a meteor or a deploy?", "dreamt Spurs won the league… nightmare."]
 
     def iniciar(self):
         w, h = self.w, self.h
@@ -2568,7 +2570,7 @@ class ClawdFesta(Cena):
     peso = 0.7
     duracao = (30, 45)
     PASSOS = ["pulo", "onda", "balanco", "agacha", "olhar", "alternado"]
-    TITULOS = ["CLAWD PARTY", "CLAWD DISCO", "NIGHT FEVER", "DEPLOY PARTY"]
+    TITULOS = ["CLAWD PARTY", "CLAWD DISCO", "NIGHT FEVER", "DEPLOY PARTY", "COYG"]
 
     def iniciar(self):
         w, h = self.w, self.h
@@ -2689,7 +2691,8 @@ class ClawdEspaco(Cena):
     peso = 0.7
     duracao = (30, 45)
     FALAS = ["Houston, we have a bug.", "Off to deploy!", "✻ Pondering the cosmos…", "To infinity and beyond the rate limit!",
-             "Is that a black hole or a memory leak?", "Wow.", "Faster than a git push --force!"]
+             "Is that a black hole or a memory leak?", "Wow.", "Faster than a git push --force!",
+             "Even from up here, North London is red."]
 
     def iniciar(self):
         w, h = self.w, self.h
@@ -3329,6 +3332,2131 @@ class Labirinto(Cena):
                     ch[i] = " "
 
 
+# ------------------------------------------------ Arsenal (aqui é Gooner: City e Tottenham só apanham)
+
+ARS_VERMELHO, ARS_OURO = 0xEF0107, 0xC9A24A
+NBSP = " "  # espaço que o render pinta com o fundo (o " " sempre sai sem fundo)
+CABELOS = [0x2A1E14, 0x3B2A1C, 0x14100C, 0x5A3E24, 0x8A6A3A, 0xD8B860, 0x1C1C1C]
+RIVAIS = {
+    "TOT": dict(sigla="TOT", nome="Tottenham", o="o Tottenham", camisa=0xF4F4F4, calcao=0x132257, meiao=0xF4F4F4,
+                goleiro=0xFF8A1F, chip=(0x132257, 0xF4F4F4), cor=0xC0C8E0, lugar="North London Derby"),
+    "MCI": dict(sigla="MCI", nome="City", o="o City", camisa=0x6CABDD, calcao=0xFFFFFF, meiao=0x6CABDD,
+                goleiro=0x9B6BE0, chip=(0x1C2C5B, 0x6CABDD), cor=0x6CABDD, lugar="Emirates Stadium"),
+}
+# (nome, papel, (x defendendo, x atacando, y)): x vai do próprio gol (0) ao do adversário (1); y de cima (0) pra baixo (1)
+ELENCO_ARSENAL = [("Raya", "GOL", (0.02, 0.07, 0.5)), ("Timber", "LD", (0.17, 0.55, 0.86)),
+                  ("Saliba", "ZAG", (0.12, 0.38, 0.64)), ("Gabriel", "ZAG", (0.12, 0.38, 0.36)),
+                  ("Calafiori", "LE", (0.17, 0.52, 0.14)), ("Zubimendi", "VOL", (0.26, 0.52, 0.5)),
+                  ("Ødegaard", "MEI", (0.33, 0.7, 0.7)), ("Rice", "MEI", (0.33, 0.68, 0.3)),
+                  ("Saka", "ATA", (0.42, 0.88, 0.88)), ("Gyökeres", "ATA", (0.45, 0.9, 0.5)),
+                  ("Martinelli", "ATA", (0.42, 0.86, 0.12))]
+ELENCO_INVENCIVEIS = [("Lehmann", "GOL", (0.02, 0.07, 0.5)), ("Lauren", "LD", (0.17, 0.55, 0.86)),
+                      ("Touré", "ZAG", (0.12, 0.38, 0.64)), ("Campbell", "ZAG", (0.12, 0.38, 0.36)),
+                      ("Cole", "LE", (0.17, 0.55, 0.14)), ("Gilberto", "VOL", (0.25, 0.52, 0.42)),
+                      ("Vieira", "MEI", (0.28, 0.62, 0.6)), ("Ljungberg", "MEI", (0.34, 0.8, 0.86)),
+                      ("Pires", "MEI", (0.34, 0.8, 0.14)), ("Bergkamp", "ATA", (0.44, 0.8, 0.6)),
+                      ("Henry", "ATA", (0.46, 0.9, 0.36))]
+FORMACAO_RIVAL = [("GOL", (0.02, 0.07, 0.5)), ("LD", (0.16, 0.5, 0.86)), ("ZAG", (0.11, 0.35, 0.64)),
+                  ("ZAG", (0.11, 0.35, 0.36)), ("LE", (0.16, 0.5, 0.14)), ("VOL", (0.24, 0.5, 0.5)),
+                  ("MEI", (0.3, 0.64, 0.72)), ("MEI", (0.3, 0.64, 0.28)), ("ATA", (0.4, 0.84, 0.86)),
+                  ("ATA", (0.43, 0.88, 0.5)), ("ATA", (0.4, 0.84, 0.14))]
+PAPEL_NOME = {"GOL": "o goleiro", "LD": "o lateral", "LE": "o lateral", "ZAG": "o zagueiro", "VOL": "o volante",
+              "MEI": "o meia", "ATA": "o atacante"}
+# bonequinho visto de cima, com os pés em (0, 0): k = cabelo, m = manga, c = camisa, s = calção, p = meião
+JOGADOR_PE = ((0, -4, "k"), (-1, -3, "m"), (0, -3, "c"), (1, -3, "m"), (0, -2, "c"), (0, -1, "s"))
+JOGADOR_PERNAS = (((0, 0, "p"),), ((-1, 0, "p"), (1, 0, "p")))
+JOGADOR_CAIDO = ((-2, 0, "k"), (-1, 0, "c"), (0, 0, "c"), (1, 0, "s"), (2, 0, "p"), (-1, -1, "m"))
+
+
+def letreiro(px, w, ph, txt, cx, cy, esc, cor, contorno=None):
+    """Texto na fonte 5x5 escrito direto num buffer de pixels, centrado em (cx, cy)."""
+    g = texto_grade(txt, esc)
+    gh, gw = len(g), len(g[0])
+    x0, y0 = int(cx - gw / 2), int(cy - gh / 2)
+    cheios = [(x0 + xx, y0 + yy) for yy in range(gh) for xx in range(gw) if g[yy][xx]]
+    if contorno is not None:
+        for x, y in cheios:
+            for ox in (-1, 0, 1):
+                for oy in (-1, 0, 1):
+                    if 0 <= x + ox < w and 0 <= y + oy < ph:
+                        px[(y + oy) * w + x + ox] = contorno
+    for x, y in cheios:
+        if 0 <= x < w and 0 <= y < ph:
+            px[y * w + x] = cor
+
+
+def esc_letreiro(txt, largura, maximo=4):
+    """Maior escala da fonte 5x5 em que txt cabe na largura (pelo menos 1)."""
+    return max(1, min(maximo, int(largura // max(1, 6 * len(txt) - 1))))
+
+
+def chip(ch, co, w, h, x, y, txt, fg, bg):
+    """Etiqueta com fundo (placar, letreiro); devolve onde ela termina."""
+    escrever(ch, co, w, h, x, y, txt.replace(" ", NBSP), fundo(fg, bg))
+    return x + len(txt)
+
+
+class Jogador:
+    """Um jogador (ou o juiz) na partida do Arsenal."""
+    __slots__ = ("time", "nome", "papel", "f", "cores", "x", "y", "dx", "fixo", "veloz", "chao", "fase")
+
+    def __init__(self, time, nome, papel, f, cores):
+        self.time, self.nome, self.papel, self.f, self.cores = time, nome, papel, f, cores
+        self.x = self.y = self.dx = 0.0
+        self.fixo = None      # (x, y) quando o roteiro manda o jogador pra algum lugar
+        self.veloz = 1.0
+        self.chao = -1.0      # fica caído no gramado até esse instante
+        self.fase = random.random()
+
+
+class Arsenal(Cena):
+    """Arsenal x Tottenham (ou City) visto de cima, com narração. O Arsenal sempre ganha."""
+    combinavel = False
+    peso = 1.0
+    duracao = (45, 60)
+    SAIDA = ["Rola a bola no Emirates!", "Bola rolando no Norte de Londres!", "Começa o jogo!"]
+    PASSE = ["{a} toca para {b}.", "{a} abre com {b}.", "{a} acha {b}.", "{a} rola para {b}.", "{a} inverte para {b}.",
+             "Tabela entre {a} e {b}.", "{a} serve {b}."]
+    ENFIA = ["{a} enfia para {b}!", "{a} lança {b}!", "{a} acha {b} nas costas da zaga!"]
+    CONDUZ = ["{a} avança.", "{a} parte pra cima!", "{a} carrega a bola.", "{a} vai pra cima da marcação."]
+    DRIBLE = ["{a} deixou o marcador no chão!", "{a} passou por um!", "Que drible de {a}!", "{a} entortou o zagueiro!"]
+    CHUTE = ["{a} bateu!", "{a} soltou a bomba!", "{a} de chapa!", "{a} chutou colocado!", "{a} arriscou!"]
+    GOL = ["GOOOOOOOL! {a}!", "É GOL DO ARSENAL! {a}!", "GOOOL! Que pintura de {a}!", "GOL! {a} não perdoa!"]
+    RIVAL = ["{O} tenta sair jogando.", "Bola com {o}.", "{O} troca passes sem objetivo.", "{O} tenta alguma coisa."]
+    RIVAL_PASSE = ["{O} toca de lado.", "{O} recua.", "{O} gira a bola.", "{O} procura espaço.", "Bola com {o}."]
+    DESARME = ["{a} desarmou!", "Que carrinho de {a}!", "{a} roubou a bola!", "{a} chegou firme e levou."]
+    DEFESA = ["{a} pegou firme.", "Defesaça de {a}!", "{a} espalmou!", "{a} fechou o gol."]
+    ISOLOU = ["ISOLOU! Foi parar na arquibancada.", "Isolou! A bola tá subindo até agora.", "Pra fora, muito longe!"]
+    ANULADO = ["ANULADO! Impedido por um dedão.", "GOL ANULADO! Impedido por um fio de cabelo.",
+               "Anulado! O VAR viu tudo."]
+    EXTRAS = {"TOT": dict(isolou=["ISOLOU! Foi parar em Seven Sisters."], gol=["North London is RED!",
+                                                                               "Feliz St. Totteringham's Day!"],
+                          final=["Fim de jogo! O Norte de Londres é vermelho!", "Tottenham: sem liga desde 1961."]),
+              "MCI": dict(isolou=["Isolou! Essa nem o VAR salva."], gol=["Toma, City!", "Aula de futebol no Emirates!"],
+                          final=["Fim de jogo! Aula de futebol no Emirates!", "O City vai recorrer. No tapetão."])}
+
+    def iniciar(self):
+        w, h = self.w, self.h
+        r = self.rival = RIVAIS["TOT"] if random.random() < 0.6 else RIVAIS["MCI"]
+        self.invenciveis = random.random() < 0.25
+        e = self.e = 2 if h >= 90 and w >= 300 else 1
+        self.ph = 2 * h
+        self.gT, self.gB = 6, 2 * h - 7
+        self.T, self.B = self.gT + 2 * e, self.gB - 2 * e
+        self.CH = self.B - self.T
+        self.CW = int(min(w - 14 * e, self.CH * 1.75))
+        self.L = (w - self.CW) // 2
+        self.R = self.L + self.CW
+        self.MX, self.MY = (self.L + self.R) // 2, (self.T + self.B) // 2
+        self.sx, self.sy = self.CW / 105, self.CH / 68
+        self.gm = max(3, round(4.8 * self.sy))  # meia boca do gol (um tico maior que a real, pra aparecer)
+        self.v = self.CW * 0.075
+        self.v_passe, self.v_chute = self.CW * 0.7, self.CW * 1.5
+        self.fundo_px = self.montar_campo()
+        self.px = [0] * (w * self.ph)
+        self.times = [[], []]
+        for nome, papel, f in (ELENCO_INVENCIVEIS if self.invenciveis else ELENCO_ARSENAL):
+            cores = {"k": random.choice(CABELOS), "m": 0xFFFFFF, "c": ARS_VERMELHO, "s": 0xFFFFFF, "p": 0xFFFFFF}
+            if papel == "GOL":
+                cores.update(m=0x1ED760, c=0x1ED760, s=0x1A1A1A, p=0x1ED760)
+            self.times[0].append(Jogador(0, nome, papel, f, cores))
+        for papel, f in FORMACAO_RIVAL:
+            cores = {"k": random.choice(CABELOS), "m": r["camisa"], "c": r["camisa"], "s": r["calcao"], "p": r["meiao"]}
+            if papel == "GOL":
+                cores.update(m=r["goleiro"], c=r["goleiro"], p=r["goleiro"])
+            self.times[1].append(Jogador(1, PAPEL_NOME[papel], papel, f, cores))
+        self.juiz = Jogador(2, "o juiz", "JUIZ", None, {"k": 0x2A1E14, "m": 0xF2E21B, "c": 0xF2E21B, "s": 0x111111,
+                                                         "p": 0x111111})
+        self.todos = self.times[0] + self.times[1] + [self.juiz]
+        self.bx, self.by, self.bz = float(self.MX), float(self.MY), 0.0
+        self.visivel, self.maos = True, False
+        self.dono, self.voo, self.posse, self.saida = None, None, 0, 0
+        self.t = self.dt = 0.0
+        for j in self.todos:
+            j.x, j.y = self.alvo(j)
+        self.gols = [random.choice((0, 0, 1)), 0]
+        self.marcados = 0
+        self.min0 = random.uniform(20, 40)
+        self.acrescimo = random.randint(2, 5)
+        self.narra, self.narra_t, self.narra_cor = "", -10.0, 0xE0E0E0
+        self.festa, self.trave = -10.0, -10.0
+        self.rede = None         # (lado, y, instante): a rede balançando
+        self.var = None          # [linha do último defensor, linha do atacante, início, instante do "anulado"]
+        self.var_usado = False
+        self.fim = None
+        self.confete = []
+        self.led = ("ARSENAL ★ COYG ★ VICTORIA CONCORDIA CRESCIT ★ NORTH LONDON IS RED ★ 1886 ★ "
+                    "THE INVINCIBLES ★ 49 JOGOS INVICTOS ★ UP THE ARSENAL ★ ")
+        self.gen = self.roteiro()
+
+    # --- campo
+
+    def montar_campo(self):
+        w, e = self.w, self.e
+        L, R, T, B, MX, MY, sx, sy = self.L, self.R, self.T, self.B, self.MX, self.MY, self.sx, self.sy
+        px = [0] * (w * self.ph)
+        faixa = max(3, self.CW // 14)
+        for y in range(self.gT, self.gB + 1):
+            for x in range(w):
+                px[y * w + x] = 0x2F7D33 if ((x - L) // faixa) % 2 else 0x388F3C
+        branco = 0xDCE8DC
+
+        def ponto(x, y, c=branco):
+            x, y = int(round(x)), int(round(y))
+            if 0 <= x < w and self.gT <= y <= self.gB:
+                px[y * w + x] = c
+
+        def linha(x0, y0, x1, y1):
+            n = int(max(abs(x1 - x0), abs(y1 - y0))) + 1
+            for k in range(n + 1):
+                ponto(x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n)
+
+        def arco(cx, cy, r, fora=None):
+            n = int(r * 8) + 12
+            for k in range(n):
+                x, y = cx + r * math.cos(2 * math.pi * k / n), cy + r * math.sin(2 * math.pi * k / n)
+                if fora is None or fora(x, y):
+                    ponto(x, y)
+
+        linha(L, T, R, T)
+        linha(L, B, R, B)
+        linha(L, T, L, B)
+        linha(R, T, R, B)
+        linha(MX, T, MX, B)
+        arco(MX, MY, 9.15 * sy)
+        marca = misturar(branco, 0x37913B, 0.45)
+        ponto(MX - 1, MY, marca)
+        ponto(MX + 1, MY, marca)
+        for lado in (-1, 1):
+            gx = L if lado < 0 else R
+            den = -lado  # pra dentro do campo
+            for prof, meia in ((16.5 * sx, 20.16 * sy), (5.5 * sx, 9.16 * sy)):
+                x2 = gx + den * prof
+                linha(gx, MY - meia, x2, MY - meia)
+                linha(gx, MY + meia, x2, MY + meia)
+                linha(x2, MY - meia, x2, MY + meia)
+            pen = gx + den * 11 * sx
+            ponto(pen, MY, marca)
+            borda = gx + den * 16.5 * sx
+            arco(pen, MY, 9.15 * sy, fora=lambda x, y, b=borda, d=den: (x - b) * d > 0.5)
+            for cy in (T, B):
+                arco(gx, cy, max(1.6, sy), fora=lambda x, y, g=gx, d=den, c=cy: (x - g) * d > 0.4 and T < y < B)
+                ponto(gx, cy - (2 if cy == T else -2), 0xFFD84A)
+            # gol: rede quadriculada atrás da linha, traves brancas
+            fundo_gol = gx - den * (3 * e + 1)
+            for y in range(MY - self.gm, MY + self.gm + 1):
+                for x in range(min(gx, fundo_gol), max(gx, fundo_gol) + 1):
+                    if x != gx:
+                        ponto(x, y, 0xA8B4A8 if (x + y) % 2 else escala(px[y * w + x], 0.6))
+            linha(gx, MY - self.gm, fundo_gol, MY - self.gm)
+            linha(gx, MY + self.gm, fundo_gol, MY + self.gm)
+            linha(fundo_gol, MY - self.gm, fundo_gol, MY + self.gm)
+            for y in range(MY - self.gm, MY + self.gm + 1):
+                ponto(gx, y, 0xFFFFFF)
+        return px
+
+    def campo(self, time, fx, fy):
+        if time == 0:
+            return self.L + fx * self.CW, self.T + fy * self.CH
+        return self.R - fx * self.CW, self.B - fy * self.CH
+
+    def dentro(self, x, y):
+        return max(self.L + 1.0, min(self.R - 1.0, x)), max(self.T + 1.0, min(self.B - 1.0, y))
+
+    def prog(self, j):
+        return (j.x - self.L) / self.CW if j.time == 0 else (self.R - j.x) / self.CW
+
+    def minuto(self):
+        return self.min0 + self.t * 1.2
+
+    def narrar(self, txt, cor=0xE0E0E0, fraca=False):
+        """fraca: lance corriqueiro (passe, condução), que não atropela uma frase que acabou de entrar."""
+        if fraca and self.t - self.narra_t < 1.2:
+            return
+        self.narra, self.narra_t, self.narra_cor = txt, self.t, cor
+
+    # --- quem vai pra onde
+
+    def alvo(self, j):
+        if j.fixo:
+            return j.fixo
+        e = self.e
+        if j.time == 2:  # o juiz acompanha o lance de longe
+            return self.dentro(self.bx - 16 * e, self.by + (11 if self.by < self.MY else -11) * e)
+        p = (self.bx - self.L) / self.CW if j.time == 0 else (self.R - self.bx) / self.CW
+        k = clamp((p - 0.12) / 0.72 + (0.1 if self.posse == j.time else -0.08))
+        xd, xa, fy = j.f
+        fx = xd + (xa - xd) * k
+        byn = (self.by - self.T) / self.CH
+        if j.time == 1:
+            byn = 1 - byn
+        if j.papel == "GOL":
+            fy = 0.5 + (byn - 0.5) * 0.1
+        else:
+            fy += (byn - 0.5) * 0.3
+        if self.saida is not None:
+            fx = min(fx, 0.45)
+        return self.campo(j.time, fx, fy)
+
+    def mover(self, dt):
+        alvos = {j: self.alvo(j) for j in self.todos}
+        d, e = self.dono, self.e
+        if d and d.time != 2 and self.saida is None and self.fim is None:
+            marcam = [j for j in self.times[1 - d.time] if j.papel != "GOL" and not j.fixo and self.t >= j.chao]
+            marcam.sort(key=lambda j: (j.x - d.x) ** 2 + (j.y - d.y) ** 2)
+            lado = 1 if d.time == 0 else -1
+            if marcam:
+                alvos[marcam[0]] = (d.x + lado * 4 * e, d.y + (e if marcam[0].y > d.y else -e))
+            if len(marcam) > 1:
+                ax, ay = alvos[marcam[1]]
+                alvos[marcam[1]] = ((ax + d.x) / 2, (ay + d.y) / 2)
+        for j in self.todos:
+            if self.t < j.chao:
+                j.dx = 0.0
+                continue
+            tx, ty = alvos[j]
+            tx, ty = max(2.0, min(self.w - 3.0, tx)), max(self.gT + 4.0 * e, min(float(self.gB), ty))
+            dx, dy = tx - j.x, ty - j.y
+            dist = math.hypot(dx, dy)
+            passo = self.v * j.veloz * dt
+            if dist <= passo:
+                j.x, j.y, j.dx = tx, ty, dist
+            else:
+                j.x += dx / dist * passo
+                j.y += dy / dist * passo
+                j.dx = passo
+
+    def mover_bola(self, dt):
+        if self.voo:
+            x0, y0, z0, x1, y1, z1, t0, dur, alt = self.voo
+            s = (self.t - t0) / dur
+            if s >= 1:
+                self.bx, self.by, self.bz, self.voo = x1, y1, z1, None
+            else:
+                self.bx, self.by = x0 + (x1 - x0) * s, y0 + (y1 - y0) * s
+                self.bz = z0 + (z1 - z0) * s + alt * math.sin(s * math.pi)
+        elif self.dono:
+            d = self.dono
+            lado = 1 if d.time == 0 else -1
+            if self.maos:
+                tx, ty, self.bz = d.x + lado * self.e, d.y - 2 * self.e, 0.0
+            else:
+                tx, ty, self.bz = d.x + lado * 2 * self.e, d.y, 0.0
+            k = min(1.0, dt * 18)
+            self.bx += (tx - self.bx) * k
+            self.by += (ty - self.by) * k
+
+    # --- lances (geradores: cada yield é um quadro)
+
+    def voar(self, x1, y1, dur, alt=0.0, z1=0.0):
+        self.dono, self.maos = None, False
+        self.voo = (self.bx, self.by, self.bz, x1, y1, z1, self.t, max(0.05, dur), alt)
+        while self.voo:
+            yield
+
+    def chutar(self, x1, y1, alt=0.0, z1=0.0):
+        d = math.hypot(x1 - self.bx, y1 - self.by)
+        yield from self.voar(x1, y1, 0.06 + d / self.v_chute, alt, z1)
+
+    def passar(self, de, para, alto=False, txt=None, cor=0xE0E0E0):
+        lado = 1 if para.time == 0 else -1
+        tx, ty = self.dentro(para.x + lado * random.uniform(1, 5) * self.e, para.y + random.uniform(-2, 2) * self.e)
+        d = math.hypot(tx - self.bx, ty - self.by)
+        para.fixo, para.veloz = (tx, ty), 1.5
+        self.posse = para.time
+        if txt:
+            self.narrar(txt, cor, fraca=True)
+        yield from self.voar(tx, ty, 0.15 + d / self.v_passe, d * 0.22 if alto else 0.0)
+        para.fixo, para.veloz = None, 1.0
+        self.dono = para
+
+    def conduzir(self, j, dist, dy=0.0, dur=1.6, drible=False, falar=True):
+        lado = 1 if j.time == 0 else -1
+        tx, ty = self.dentro(j.x + lado * dist, j.y + dy)
+        j.fixo, j.veloz = (tx, ty), 1.1
+        if falar and j.time == 0:
+            self.narrar(random.choice(self.CONDUZ).format(a=j.nome), fraca=True)
+        ini = self.t
+        while self.t - ini < dur and math.hypot(j.x - tx, j.y - ty) > 0.6:
+            yield
+        j.fixo, j.veloz = None, 1.0
+        if drible:
+            perto = [r for r in self.times[1 - j.time] if r.papel != "GOL" and self.t >= r.chao]
+            if perto:
+                r = min(perto, key=lambda r: math.hypot(r.x - j.x, r.y - j.y))
+                if math.hypot(r.x - j.x, r.y - j.y) < 9 * self.e:
+                    r.chao = self.t + 1.4
+                    if j.time == 0:
+                        self.narrar(random.choice(self.DRIBLE).format(a=j.nome))
+
+    def escolher(self, j, minimo):
+        cands = []
+        for p in self.times[j.time]:
+            if p is j or p.papel == "GOL" or self.t < p.chao:
+                continue
+            d = math.hypot(p.x - j.x, p.y - j.y)
+            av = self.prog(p) - self.prog(j)
+            if 10 * self.e <= d <= self.CW * 0.5 and av >= minimo:
+                cands.append((av + random.uniform(0, 0.25), p))
+        if not cands:
+            cands = [(random.random(), p) for p in self.times[j.time] if p is not j and p.papel != "GOL"]
+        return max(cands, key=lambda c: c[0])[1]
+
+    def esperar_chegar(self, j, limite):
+        ini = self.t
+        while j.fixo and self.t - ini < limite and math.hypot(j.x - j.fixo[0], j.y - j.fixo[1]) > 0.8:
+            yield
+
+    def roteiro(self):
+        yield from self.saida_de_bola(0)
+        posse = 0
+        while True:
+            if self.minuto() >= 90 + self.acrescimo:
+                yield from self.apito_final()
+            if posse == 0:
+                posse = yield from self.ataque_arsenal()
+            else:
+                posse = yield from self.ataque_rival()
+
+    def saida_de_bola(self, time):
+        self.voo, self.dono, self.maos, self.visivel = None, None, False, True
+        self.bx, self.by, self.bz = float(self.MX), float(self.MY), 0.0
+        self.saida = self.posse = time
+        lado = 1 if time == 0 else -1
+        meus = self.times[time]
+        cob = min((j for j in meus if j.papel == "ATA"), key=lambda j: abs(j.f[2] - 0.5))
+        cob.fixo = (self.MX - lado * 2 * self.e, float(self.MY))
+        for j in self.todos:
+            j.veloz = 2.4
+        ini = self.t
+        while self.t - ini < 2.6 and any(math.hypot(j.x - a[0], j.y - a[1]) > 2 * self.e
+                                       for j in self.todos[:-1] for a in (self.alvo(j),)):
+            yield
+        for j in self.todos:
+            j.veloz = 1.0
+        yield from self.esperar(0.3)
+        if time == 0:
+            self.narrar(random.choice(self.SAIDA))
+        else:
+            self.narrar(f"Saída para {self.rival['o']}.", 0x9A9A9A)
+        self.dono, cob.fixo, self.saida = cob, None, None
+        meia = random.choice([j for j in meus if j.papel in ("VOL", "MEI")])
+        yield from self.passar(cob, meia)
+
+    def ataque_arsenal(self):
+        e = self.e
+        for k in range(random.randint(2, 4)):
+            j = self.dono
+            if random.random() < 0.5:
+                yield from self.conduzir(j, random.uniform(5, 14) * e, random.uniform(-4, 4) * e,
+                                         drible=random.random() < 0.3)
+            alvo = self.escolher(j, -0.04 + k * 0.04)
+            yield from self.passar(j, alvo, random.random() < 0.15, random.choice(self.PASSE).format(a=j.nome, b=alvo.nome))
+        j = self.dono
+        if self.prog(j) < 0.62:
+            frente = [p for p in self.times[0] if p.papel in ("ATA", "MEI") and p is not j]
+            alvo = max(frente, key=lambda p: self.prog(p) + random.uniform(0, 0.2))
+            yield from self.passar(j, alvo, random.random() < 0.3, random.choice(self.ENFIA).format(a=j.nome, b=alvo.nome))
+            j = alvo
+        borda = self.R - self.CW * random.uniform(0.12, 0.22)
+        if j.x < borda - 2:
+            yield from self.conduzir(j, borda - j.x, (self.MY - j.y) * 0.5, dur=2.2, drible=random.random() < 0.5)
+        return (yield from self.finalizar(j))
+
+    def finalizar(self, j):
+        e = self.e
+        gk = self.times[1][0]
+        canto = random.choice((-1, 1))
+        res = random.choices(("gol", "defesa", "trave", "escanteio", "fora"), (0.34, 0.22, 0.14, 0.18, 0.12))[0]
+        if self.marcados == 0 and self.t > 24:
+            res = "gol"  # a cena não acaba sem gol do Arsenal
+        self.narrar(random.choice(self.CHUTE).format(a=j.nome))
+        alt = random.choice((0.0, 0.0, 2.0 * e))
+        if res == "gol":
+            gy = self.MY + canto * (self.gm - 1.5 * e)
+            gk.fixo, gk.veloz = (gk.x, self.MY - canto * self.gm), 2.2
+            yield from self.chutar(self.R + 2 * e, gy, alt)
+            gk.chao = self.t + 1.5
+            self.rede = (1, gy, self.t)
+            return (yield from self.comemorar(j))
+        if res == "defesa":
+            gy = self.MY + canto * random.uniform(0, self.gm - 1.5 * e)
+            gk.fixo, gk.veloz = (self.R - 1.5 * e, gy), 4.0
+            yield from self.chutar(self.R - 2 * e, gy, alt)
+            gk.fixo = None
+            self.dono, self.maos, self.posse = gk, True, 1
+            self.narrar(random.choice(("Defendeu o goleiro d{}.", "Que defesa do goleiro d{}!")).format(self.rival["o"]),
+                        0x9A9A9A)
+            yield from self.esperar(1.2)
+            self.maos = False
+            lat = random.choice([p for p in self.times[1] if p.papel in ("LD", "LE", "ZAG")])
+            yield from self.passar(gk, lat)
+            return 1
+        if res == "trave":
+            gk.fixo, gk.veloz = (gk.x, self.MY - canto * self.gm * 0.5), 2.0
+            yield from self.chutar(self.R, self.MY + canto * self.gm, alt)
+            self.trave = self.t
+            self.narrar(random.choice(("NA TRAVE!", "Carimbou o travessão!", "NO POSTE!")), 0xFFD84A)
+            gk.fixo = None
+            rx, ry = self.R - self.CW * random.uniform(0.07, 0.15), self.MY + random.uniform(-0.18, 0.18) * self.CH
+            cands = [p for p in self.times[0] if p.papel in ("ATA", "MEI") and p is not j] or [j]
+            atac = min(cands, key=lambda p: math.hypot(p.x - rx, p.y - ry))
+            zag = min((p for p in self.times[1] if p.papel == "ZAG"), key=lambda p: math.hypot(p.x - rx, p.y - ry))
+            atac.fixo, atac.veloz = (rx, ry), 1.9
+            zag.fixo, zag.veloz = (rx + 3 * e, ry + e), 1.3
+            yield from self.voar(rx, ry, 0.55, 3 * e)
+            atac.fixo = zag.fixo = None
+            atac.veloz = zag.veloz = 1.0
+            if random.random() < 0.5:
+                self.dono = atac
+                self.narrar(f"No rebote, {atac.nome}...", 0xFFFFFF)
+                yield from self.esperar(0.15)
+                gy = self.MY + random.uniform(-1, 1) * (self.gm - 1.5 * e)
+                gk.fixo, gk.veloz = (gk.x, 2 * self.MY - gy), 2.0
+                yield from self.chutar(self.R + 2 * e, gy)
+                gk.chao = self.t + 1.4
+                self.rede = (1, gy, self.t)
+                return (yield from self.comemorar(atac))
+            self.dono, self.posse = zag, 1
+            self.narrar("O zagueiro afasta o perigo.", 0x9A9A9A)
+            alvo = random.choice([p for p in self.times[1] if p.papel in ("MEI", "ATA")])
+            yield from self.passar(zag, alvo, True)
+            return 1
+        if res == "fora":
+            yield from self.chutar(self.R + 2 * e, self.MY + canto * (self.gm + random.uniform(2, 7) * e), alt)
+            self.visivel = False
+            self.narrar(random.choice(("Pra fora! Tirou tinta da trave.", "Passou raspando!", "Uuuh! Por pouco!")),
+                        0xFFD84A)
+            yield from self.esperar(1.2)
+            return (yield from self.tiro_de_meta(1))
+        gy = self.MY + canto * (self.gm - 1.5 * e)
+        gk.fixo, gk.veloz = (self.R - 1.5 * e, gy), 4.0
+        yield from self.chutar(self.R - 2 * e, gy, alt)
+        gk.chao = self.t + 1.0
+        self.narrar("Espalmou pra escanteio!", 0x9A9A9A)
+        yield from self.voar(self.R + 3 * e, gy + canto * 3 * e, 0.4, 3 * e)
+        gk.fixo = None
+        return (yield from self.escanteio(canto))
+
+    def escanteio(self, canto):
+        e = self.e
+        ars, riv = self.times
+        fy = self.T if canto < 0 else self.B
+        nomes = ("Henry", "Pires") if self.invenciveis else ("Rice", "Saka", "Ødegaard")
+        bat = random.choice([p for p in ars if p.nome in nomes])
+        cab = next(p for p in ars if p.nome in ("Campbell", "Gabriel"))
+        area = [p for p in ars if p.papel in ("ZAG", "ATA", "VOL") and p is not bat and p is not cab]
+        marc = [p for p in riv if p.papel != "GOL"]
+        random.shuffle(marc)
+        for k, p in enumerate([cab] + area):
+            if p is cab:
+                p.fixo = (self.R - self.CW * 0.075, self.MY + random.uniform(-0.1, 0.1) * self.CH)
+            else:
+                p.fixo = (self.R - self.CW * random.uniform(0.04, 0.16), self.MY + random.uniform(-0.22, 0.22) * self.CH)
+            p.veloz = 1.6
+            if k < len(marc):
+                marc[k].fixo, marc[k].veloz = (p.fixo[0] + 2 * e, p.fixo[1] + random.choice((-1, 1)) * e), 1.6
+        bat.fixo, bat.veloz = (self.R - 2.0 * e, float(fy)), 2.6
+        self.bx, self.by, self.bz, self.visivel, self.posse = self.R - 0.5, float(fy), 0.0, True, 0
+        self.narrar(f"Escanteio. {bat.nome} vai para a bola.")
+        yield from self.esperar_chegar(bat, 1.8)
+        yield from self.esperar_chegar(cab, 0.6)
+        self.dono = bat
+        yield from self.esperar(0.5)
+        self.narrar("Bola parada do Arsenal: perigo!")
+        yield from self.voar(cab.x + e, cab.y, 0.95, 9 * e, 4 * e)
+        gk = riv[0]
+        if random.random() < 0.3:
+            gk.fixo, gk.veloz = (cab.x + 2 * e, cab.y), 3.0
+            yield from self.esperar_chegar(gk, 0.6)
+            self.narrar("O goleiro saiu do gol e ficou com ela.", 0x9A9A9A)
+            for p in self.todos:
+                p.fixo, p.veloz = None, 1.0
+            self.dono, self.maos, self.posse = gk, True, 1
+            yield from self.esperar(1.0)
+            self.maos = False
+            yield from self.passar(gk, random.choice([p for p in riv if p.papel in ("LD", "LE", "VOL")]))
+            return 1
+        self.narrar(f"{cab.nome} SUBIU MAIS QUE TODO MUNDO!", 0xFFFFFF)
+        gy = self.MY + random.uniform(-1, 1) * (self.gm - 1.5 * e)
+        gk.fixo, gk.veloz = (gk.x, 2 * self.MY - gy), 1.5
+        yield from self.voar(self.R + 2 * e, gy, 0.08 + (self.R - cab.x) / self.v_chute, 0.0, e)
+        self.rede = (1, gy, self.t)
+        for p in self.todos:
+            p.fixo, p.veloz = None, 1.0
+        return (yield from self.comemorar(cab, "Mais um gol de bola parada!", "GOOOL! {a} DE CABEÇA!"))
+
+    def comemorar(self, autor, extra=None, frase=None):
+        e = self.e
+        self.gols[0] += 1
+        self.marcados += 1
+        self.festa = self.t
+        self.posse = 0
+        self.narrar((frase or random.choice(self.GOL)).format(a=autor.nome), ARS_VERMELHO)
+        cy = self.T + 3 * e if autor.y < self.MY else self.B - 3 * e
+        cx = self.R - 3 * e
+        autor.fixo, autor.veloz = (cx, cy), 1.4
+        for j in self.times[0]:
+            if j is not autor and j.papel != "GOL":
+                dy = random.uniform(2, 12) * e
+                j.fixo, j.veloz = (cx - random.uniform(4, 24) * e, cy + (dy if cy < self.MY else -dy)), 1.3
+        for j in self.times[1]:
+            j.fixo = (j.x, j.y)
+            if j.papel != "GOL" and random.random() < 0.25:
+                j.chao = self.t + random.uniform(2, 4)
+        for _ in range(110):
+            self.confete.append([random.uniform(0, self.w), random.uniform(self.gT - 12, self.gT), random.uniform(-4, 4),
+                                 random.uniform(10, 26), random.choice((ARS_VERMELHO, 0xFFFFFF, 0xFFFFFF, ARS_OURO)),
+                                 random.uniform(0, 6.3), self.t])
+        yield from self.esperar(2.2)
+        if extra is None:
+            extra = random.choice(self.EXTRAS[self.rival["sigla"]]["gol"] +
+                                  (["Isso é o futebol de Wenger!", "Invencíveis!"] if self.invenciveis else []))
+        self.narrar(extra, 0xFFFFFF)
+        yield from self.esperar(1.6)
+        for j in self.todos:
+            j.fixo, j.veloz = None, 1.0
+        yield from self.saida_de_bola(1)
+        return 1
+
+    def ataque_rival(self):
+        e = self.e
+        cinza = 0x9A9A9A
+        o = self.rival["o"]
+        if random.random() < 0.6:
+            self.narrar(random.choice(self.RIVAL).format(o=o, O=o[0].upper() + o[1:]), cinza)
+        for k in range(random.randint(2, 4)):
+            j = self.dono
+            if j.papel != "GOL" and random.random() < 0.45:
+                yield from self.conduzir(j, random.uniform(5, 12) * e, random.uniform(-4, 4) * e, falar=False)
+            txt = random.choice(self.RIVAL_PASSE).format(o=o, O=o[0].upper() + o[1:]) if random.random() < 0.5 else None
+            yield from self.passar(j, self.escolher(j, -0.02 + 0.04 * k), txt=txt, cor=cinza)
+        j = self.dono
+        res = random.choices(("desarme", "isolou", "defesa", "var"), (0.36, 0.26, 0.22, 0.0 if self.var_usado else 0.16))[0]
+        if res == "desarme":
+            return (yield from self.desarme(j))
+        borda = self.L + self.CW * random.uniform(0.2, 0.32)
+        if j.x > borda + 2:
+            yield from self.conduzir(j, j.x - borda, (self.MY - j.y) * 0.4, dur=2.0, falar=False)
+        quem = j.nome[0].upper() + j.nome[1:] + " d" + o
+        gk = self.times[0][0]
+        if res == "isolou":
+            self.narrar(f"{quem} arrisca de longe...", cinza)
+            yield from self.esperar(0.2)
+            yield from self.voar(self.L - 4 * e, self.MY + random.uniform(-0.4, 0.4) * self.CH, 0.9, 0.0, self.CH * 0.8)
+            self.visivel = False
+            self.narrar(random.choice(self.ISOLOU + self.EXTRAS[self.rival["sigla"]]["isolou"] * 2), 0xFFD84A)
+            yield from self.esperar(1.4)
+            return (yield from self.tiro_de_meta())
+        canto = random.choice((-1, 1))
+        self.narrar(f"{quem} bateu...", cinza)
+        if res == "defesa":
+            gy = self.MY + canto * random.uniform(0, self.gm - 1.5 * e)
+            gk.fixo, gk.veloz = (self.L + 1.5 * e, gy), 4.0
+            yield from self.chutar(self.L + 2 * e, gy, random.choice((0.0, 2.0 * e)))
+            gk.fixo = None
+            self.dono, self.maos, self.posse = gk, True, 0
+            self.narrar(random.choice(self.DEFESA).format(a=gk.nome))
+            yield from self.esperar(1.2)
+            self.maos = False
+            lat = random.choice([p for p in self.times[0] if p.papel in ("LD", "LE")])
+            yield from self.passar(gk, lat)
+            return 0
+        # "gol" do rival... que o VAR anula
+        self.var_usado = True
+        gy = self.MY + canto * (self.gm - 1.5 * e)
+        gk.fixo, gk.veloz = (gk.x, self.MY - canto * self.gm), 2.0
+        yield from self.chutar(self.L - 2 * e, gy)
+        gk.chao = self.t + 1.6
+        self.rede = (-1, gy, self.t)
+        self.narrar(f"Gol d{o}?! Calma...", self.rival["cor"])
+        j.fixo, j.veloz = self.dentro(j.x + 10 * e, j.y + random.uniform(-6, 6) * e), 1.4
+        yield from self.esperar(1.4)
+        ultimo = min(p.x for p in self.times[0] if p.papel != "GOL")
+        self.var = [ultimo, ultimo - random.uniform(0.8, 2.2) * e, self.t, None]
+        self.narrar("O VAR chama. Checando impedimento...", 0x8AB4FF)
+        yield from self.esperar(2.8)
+        self.var[3] = self.t
+        self.narrar(random.choice(self.ANULADO), 0xFFFFFF)
+        yield from self.esperar(2.2)
+        self.var = None
+        gk.fixo = j.fixo = None
+        j.veloz = 1.0
+        zag = random.choice([p for p in self.times[0] if p.papel == "ZAG"])
+        self.bx, self.by = self.dentro(ultimo, self.MY + random.uniform(-0.25, 0.25) * self.CH)
+        self.bz = 0.0
+        zag.fixo, zag.veloz = (self.bx - 1.5 * e, self.by), 1.6
+        yield from self.esperar_chegar(zag, 2.5)
+        zag.fixo, zag.veloz = None, 1.0
+        self.dono, self.posse = zag, 0
+        self.narrar("Tiro livre para o Arsenal.")
+        yield from self.esperar(0.5)
+        return 0
+
+    def desarme(self, j):
+        d = min((p for p in self.times[0] if p.papel != "GOL" and self.t >= p.chao),
+                key=lambda p: math.hypot(p.x - j.x, p.y - j.y))
+        d.veloz = 1.9
+        j.fixo = self.dentro(j.x - 8 * self.e, j.y)
+        ini = self.t
+        while self.t - ini < 2.5 and math.hypot(d.x - j.x, d.y - j.y) > 2 * self.e:
+            d.fixo = (j.x, j.y)
+            yield
+        d.fixo, d.veloz, j.fixo = None, 1.0, None
+        j.chao = self.t + 1.6
+        if self.rival["sigla"] == "TOT" and random.random() < 0.3:
+            self.narrar(f"{j.nome[0].upper() + j.nome[1:]} do Tottenham caiu sozinho. Típico.")
+        else:
+            self.narrar(random.choice(self.DESARME).format(a=d.nome))
+        self.dono, self.posse = d, 0
+        yield from self.esperar(0.3)
+        return 0
+
+    def tiro_de_meta(self, time=0):
+        gk = self.times[time][0]
+        x, y = self.campo(time, 0.045, 0.5 + random.choice((-1, 1)) * 0.08)
+        gk.fixo, gk.veloz = (x, y), 1.5
+        yield from self.esperar_chegar(gk, 2.0)
+        gk.fixo, gk.veloz = None, 1.0
+        self.bx, self.by, self.bz, self.visivel = x + (2 if time == 0 else -2) * self.e, y, 0.0, True
+        self.dono, self.posse = gk, time
+        if time == 0:
+            self.narrar(f"Tiro de meta. {gk.nome} lança.")
+        else:
+            self.narrar(f"Tiro de meta para {self.rival['o']}.", 0x9A9A9A)
+        yield from self.esperar(0.7)
+        yield from self.passar(gk, random.choice([p for p in self.times[time] if p.papel in ("ATA", "MEI")]), True)
+        return time
+
+    def apito_final(self):
+        self.fim = self.t
+        self.dono = self.voo = None
+        frases = ["Apita o árbitro! Fim de jogo!"] + self.EXTRAS[self.rival["sigla"]]["final"]
+        if self.invenciveis:
+            frases.append("Invencíveis! 49 jogos sem perder.")
+        frases.append(f"Arsenal {self.gols[0]} x {self.gols[1]} {self.rival['nome']}.")
+        for j in self.times[0]:
+            j.fixo = (self.MX + random.uniform(-0.18, 0.18) * self.CW, self.MY + random.uniform(-0.22, 0.22) * self.CH)
+            j.veloz = 1.2
+        for j in self.times[1]:
+            j.fixo = (j.x, j.y)
+            if j.papel != "GOL" and random.random() < 0.5:
+                j.chao = 1e9
+        k = 0
+        while True:
+            self.narrar(frases[k % len(frases)], ARS_VERMELHO if k == 0 else 0xFFFFFF)
+            k += 1
+            ini = self.t
+            while self.t - ini < 3.5:
+                if random.random() < self.dt * 8:
+                    self.confete.append([random.uniform(0, self.w), float(self.gT), random.uniform(-3, 3),
+                                         random.uniform(4, 12), random.choice((ARS_VERMELHO, 0xFFFFFF, ARS_OURO)),
+                                         random.uniform(0, 6.3), self.t])
+                yield
+
+    # --- desenho
+
+    def draw(self, t, dt, ch, co):
+        self.t, self.dt = t, dt
+        next(self.gen)
+        self.mover(dt)
+        self.mover_bola(dt)
+        w, h, e, ph = self.w, self.h, self.e, self.ph
+        px = self.px
+        px[:] = self.fundo_px
+        self.desenhar_rede(px)
+        bola = None
+        if self.visivel:
+            bx, by = int(self.bx), int(self.by)
+            if self.bz > 0.6 and self.gT <= by <= self.gB:
+                for yy in range(by, by + e):
+                    for xx in range(bx, bx + e):
+                        if 0 <= xx < w and yy <= self.gB:
+                            px[yy * w + xx] = escala(px[yy * w + xx], 0.45)
+            bola = (bx, int(self.by - self.bz))
+        festa = self.t - self.festa < 4.2 or self.fim is not None
+        for j in sorted(self.todos, key=lambda j: j.y):
+            self.desenhar_jogador(px, j, festa)
+        if bola:
+            if self.bz <= 0.6:
+                for xx in range(bola[0], bola[0] + e):
+                    if 0 <= xx < w and bola[1] + 1 <= self.gB:
+                        px[(bola[1] + 1) * w + xx] = escala(px[(bola[1] + 1) * w + xx], 0.4)
+            for yy in range(bola[1] - e + 1, bola[1] + 1):
+                for xx in range(bola[0], bola[0] + e):
+                    if 0 <= xx < w and 0 <= yy < ph:
+                        px[yy * w + xx] = 0xFFFFFF
+        self.desenhar_confete(px, dt)
+        self.desenhar_letreiros(px)
+        pixels_para_celulas(px, w, h, ch, co)
+        self.desenhar_hud(ch, co)
+
+    def desenhar_rede(self, px):
+        if not self.rede or self.t - self.rede[2] > 0.7:
+            return
+        lado, gy, t0 = self.rede
+        w, e = self.w, self.e
+        fundo_gol = (self.R + 3 * e + 1) if lado > 0 else (self.L - 3 * e - 1)
+        k = 1 + int(2 * e * (1 - (self.t - t0) / 0.7))
+        for y in range(int(gy) - 3 * e, int(gy) + 3 * e + 1):
+            if self.MY - self.gm < y < self.MY + self.gm:
+                for d in range(1, k + 1):
+                    x = fundo_gol + lado * d
+                    if 0 <= x < w:
+                        px[y * w + x] = 0xC8D4C8 if (x + y) % 2 else 0x7A867A
+
+    def desenhar_jogador(self, px, j, festa):
+        w, ph, e = self.w, self.ph, self.e
+        cores = j.cores
+        x0, y0 = int(j.x), int(j.y)
+        if self.t < j.chao:
+            partes = JOGADOR_CAIDO
+        else:
+            if festa and j.time == 0 and j.papel != "GOL" and j.dx < 0.05:
+                y0 -= int(abs(math.sin(self.t * 9 + j.fase * 6)) * 2.5 * e)
+            anda = 1 if j.dx > 0.02 and int(self.t * 9 + j.fase * 2) % 2 else 0
+            partes = JOGADOR_PE + JOGADOR_PERNAS[anda]
+        for dx, dy, k in partes:
+            c = cores[k]
+            for yy in range(y0 + dy * e, y0 + dy * e + e):
+                if 0 <= yy < ph:
+                    b = yy * w
+                    for xx in range(x0 + dx * e, x0 + dx * e + e):
+                        if 0 <= xx < w:
+                            px[b + xx] = c
+
+    def desenhar_confete(self, px, dt):
+        w = self.w
+        vivos = []
+        for c in self.confete:
+            c[0] += (c[2] + math.sin(self.t * 4 + c[5]) * 6) * dt
+            c[1] += c[3] * dt
+            if c[1] < self.gB and self.t - c[6] < 4.5:
+                vivos.append(c)
+                x, y = int(c[0]), int(c[1])
+                if 0 <= x < w and self.gT <= y:
+                    px[y * w + x] = c[4]
+        self.confete = vivos
+
+    def desenhar_letreiros(self, px):
+        w, ph = self.w, self.ph
+        t = self.t
+        if self.t - self.trave < 0.4:
+            gx = self.R
+            for y in range(self.MY - self.gm, self.MY + self.gm + 1):
+                px[y * w + gx] = 0xFFF2A0
+        if self.var:
+            ultimo, atac, t0, anulado = self.var
+            for y in range(self.T, self.B + 1):
+                for x, c in ((int(ultimo), 0x3C8CFF), (int(atac), 0xFF3B3B)):
+                    if 0 <= x < w:
+                        px[y * w + x] = misturar(px[y * w + x], c, 0.85)
+            cx, cy = self.MX, self.T + self.CH * 0.22
+            gw, gh = 26 * self.e, 9 * self.e
+            for y in range(int(cy - gh / 2), int(cy + gh / 2) + 1):
+                for x in range(int(cx - gw / 2), int(cx + gw / 2) + 1):
+                    if 0 <= x < w and 0 <= y < ph:
+                        px[y * w + x] = misturar(px[y * w + x], 0x0A1020, 0.8)
+            letreiro(px, w, ph, "VAR", cx, cy, self.e, 0xFFFFFF if int(t * 3) % 2 else 0x8AB4FF)
+            if anulado is not None:
+                txt = "GOL ANULADO"
+                letreiro(px, w, ph, txt, self.MX, self.MY, esc_letreiro(txt, self.CW * 0.85, 3),
+                         0xFFFFFF, ARS_VERMELHO)
+        if self.t - self.festa < 3.0:
+            txt = "GOOOOL!"
+            pisca = int((self.t - self.festa) * 5) % 2
+            letreiro(px, w, ph, txt, self.MX, self.MY, esc_letreiro(txt, self.CW * 0.7, 4),
+                     0xFFFFFF if pisca else ARS_VERMELHO, ARS_VERMELHO if pisca else 0xFFFFFF)
+        if self.fim is not None and self.t - self.fim < 3.5:
+            txt = "FIM DE JOGO"
+            letreiro(px, w, ph, txt, self.MX, self.MY, esc_letreiro(txt, self.CW * 0.85, 3), 0xFFFFFF, ARS_VERMELHO)
+
+    def desenhar_hud(self, ch, co):
+        w, h, t = self.w, self.h, self.t
+        r = self.rival
+        m = self.minuto()
+        if self.fim is not None:
+            relogio = "FIM"
+        elif m >= 90:
+            relogio = f"90+{min(self.acrescimo, int(m - 90) + 1)}'"
+        else:
+            relogio = f"{int(m):02d}:{int(m % 1 * 60):02d}"
+        x = chip(ch, co, w, h, 2, 1, " ARS ", 0xFFFFFF, ARS_VERMELHO)
+        x = chip(ch, co, w, h, x, 1, f" {self.gols[0]}-{self.gols[1]} ", 0xFFFFFF, 0x1C1C1C)
+        x = chip(ch, co, w, h, x, 1, f" {r['sigla']} ", r["chip"][0], r["chip"][1])
+        chip(ch, co, w, h, x + 1, 1, f" {relogio} ", 0xD8D8D8, 0x2E2E2E)
+        lugar = "Arsenal 2003/04 · Invencíveis" if self.invenciveis else r["lugar"]
+        escrever(ch, co, w, h, w - len(lugar) - 2, 1, lugar, 0x8A8A8A)
+        gol = self.t - self.festa < 4.2
+        for y, sentido in ((2, 1), (h - 3, -1)):
+            if gol:
+                txt = " GOOOOL ★ ARSENAL ★"
+                off = int(t * 20) * sentido
+                fg = 0xFFFFFF if int(t * 6) % 2 else 0xFFD84A
+                bg = ARS_VERMELHO
+            else:
+                txt = self.led
+                off = int(t * 9) * sentido
+                fg, bg = 0xFF3A3A, 0x1A0303
+            for x in range(w):
+                s = txt[(x + off) % len(txt)]
+                escrever(ch, co, w, h, x, y, NBSP if s == " " else s, fundo(ARS_OURO if s == "★" and not gol else fg, bg))
+        if self.narra:
+            n = min(len(self.narra), int((t - self.narra_t) * 45) + 1)
+            cor_n = self.narra_cor
+            if cor_n == ARS_VERMELHO and int(t * 4) % 2:
+                cor_n = 0xFFFFFF
+            escrever(ch, co, w, h, 2, h - 2, "▸", ARS_VERMELHO)
+            escrever(ch, co, w, h, 4, h - 2, self.narra[:n], cor_n)
+        d = self.dono
+        if d and d.time == 0 and d.papel != "GOL" and self.fim is None and self.t - self.festa > 4.2:
+            y = (int(d.y) - 6 * self.e) // 2
+            x = int(d.x) - len(d.nome) // 2
+            if y * 2 >= self.gT:
+                for k, s in enumerate(d.nome):
+                    xx = x + k
+                    if 0 <= xx < w:
+                        escrever(ch, co, w, h, xx, y, s, fundo(0xFFFFFF, self.fundo_px[2 * y * w + xx]))
+
+
+PELES = [0xF1C9A5, 0xE0AC69, 0xC68642, 0x8D5524, 0x5C3A21, 0xFFDBAC]
+
+
+CANHAO_ANG = -0.043  # o cano levemente pra cima, como no escudo
+
+
+def canhao_em(x, y, ang=CANHAO_ANG, giro=0.0):
+    """Cor do canhão (de lado, apontando pra direita) no ponto (x, y) de um espaço 40x14; None = fora.
+    ang inclina o cano em torno do munhão (negativo = pra cima); giro gira os raios da roda."""
+    carreta = 3 <= x <= 21 and 6.0 <= y <= 11.2 - 3.0 * (x - 3) / 18
+    dx, dy = x - 13.5, y - 9.6
+    d = math.hypot(dx, dy)
+    if d <= 4.2:  # a roda fica na frente de tudo
+        if d >= 3.1 or d <= 1.0:
+            return 0xFFFFFF
+        a = (math.atan2(dy, dx) - giro) % (math.pi / 2)
+        if min(a, math.pi / 2 - a) * d < 0.5:
+            return 0xFFFFFF
+        return 0x8A6420 if carreta else None
+    c, sn = math.cos(ang), math.sin(ang)
+    lx, ly = x - 13.5, y - 5.0
+    u, v = lx * c + ly * sn, -lx * sn + ly * c  # ao longo do cano / atravessado
+    if -8.5 <= u <= 22.0:
+        f = (u + 8.5) / 30.5
+        r = 2.1 - 0.5 * f + (0.45 if f >= 0.95 else 0.35 if f <= 0.05 else 0.25 if 0.33 <= f <= 0.37 else 0.0)
+        if abs(v) <= r:
+            return 0xF0D27A if v < -r * 0.3 else 0xD9B45A
+    if math.hypot(u + 10.0, v) <= 1.3:
+        return 0xD9B45A  # o botão de trás
+    return 0x9C7428 if carreta else None
+
+
+class Torcida(Cena):
+    """A torcida do Arsenal no Emirates: pula, faz ola, ergue cachecóis, acende sinalizadores e monta mosaicos."""
+    combinavel = False
+    peso = 0.8
+    duracao = (35, 50)
+    CANTOS = ["♪ One-nil to the Arsenal ♪", "♪ North London is red ♪", "♪ We love you Arsenal, we do ♪",
+              "♪ Ooh to be, ooh to be a Gooner ♪", "♪ Come on you Gunners! ♪", "♪ Good old Arsenal ♪",
+              "♪ Arsenal! Arsenal! Arsenal! ♪", "♪ Boring, boring Arsenal ♪"]
+    FALAS = ["COYG!", "Vamos, Arsenal!", "North London is red!", "Ooh to be a Gooner ♪", "Tottenham? Quem?",
+             "Esse mosaico fui eu que desenhei.", "Hoje tem gol do Saka!", "Já viu o City por aí? Nem eu."]
+    MOSAICOS = [dict(linhas=[("COYG", 1)], canto="♪ Come on you Gunners! ♪"),
+                dict(linhas=[("ARSENAL", 1)], canto="♪ Arsenal! Arsenal! Arsenal! ♪"),
+                dict(linhas=[("1886", 1)], canto="♪ Desde 1886 ♪"),
+                dict(linhas=[("49", 2), ("INVICTOS", 1)], canto="♪ We're by far the greatest team ♪"),
+                dict(linhas=[("NORTH LONDON", 1), ("IS RED", 1)], canto="♪ North London is red ♪"),
+                dict(canhao=True, canto="♪ Up the Arsenal! ♪")]
+    CAMISAS = [(ARS_VERMELHO, 0.7), (0xF2F2F2, 0.13), (0xE8C547, 0.05), (0x1B2A4A, 0.04), (0x161616, 0.05),
+               (0x6A6A6A, 0.03)]
+
+    def iniciar(self):
+        w, h = self.w, self.h
+        self.ph = 2 * h
+        self.base = 2 * (h - 3)
+        self.cols = w // 2
+        self.lins = max(1, (self.base - 8) // 4)
+        self.y0 = self.base - 4 * self.lins
+        n = self.cols * self.lins
+        cores, pesos = zip(*self.CAMISAS)
+        self.camisa, self.calca, self.pele = [], [], []
+        self.fase = [random.random() for _ in range(n)]
+        self.lado = [random.randrange(2) for _ in range(n)]
+        self.alto = [random.random() < 0.3 for _ in range(n)]
+        self.part = [random.random() > 0.025 for _ in range(n)]
+        self.var = [0.9 if random.random() < 0.15 else 1.0 for _ in range(n)]  # poucos tons: o terminal agradece
+        self.atraso = [random.random() for _ in range(n)]
+        self.sombra = [round((0.45 + 0.55 * (r + 1) / self.lins) * 8) / 8 for r in range(self.lins)]
+        base = []
+        for i in range(n):
+            s = self.sombra[i // self.cols]
+            # torcida organizada: muita gente do lado veste igual (e o terminal agradece as cores repetidas)
+            c = base[-1] if i % self.cols and random.random() < 0.5 else random.choices(cores, pesos)[0]
+            base.append(c)
+            s *= 0.85 if random.random() < 0.15 else 1.0
+            self.camisa.append(escala(c, s))
+            self.calca.append(escala(c, s * 0.78))
+            self.pele.append(escala(random.choice(PELES[:4]), s))
+        self.fundo = self.montar_fundo()
+        self.px = [0] * (w * self.ph)
+        self.esc = 2 if h >= 40 and w >= 120 else 1
+        self.cx = max(0, w - 18 * self.esc - random.randint(3, 8))
+        self.modo, self.modo_t = "pulando", 0.0
+        self.mosaico = None      # [cores por torcedor, começa a virar, começa a desvirar, cores da beirada de baixo]
+        self.flares, self.fumaca, self.bandeiras, self.confete = [], [], [], []
+        self.vento = random.uniform(-5, 5)
+        self.canto, self.canto_t = random.choice(self.CANTOS), 0.0
+        self.fala, self.fala_t, self.prox_fala = "", -10.0, random.uniform(3, 7)
+        self.t = 0.0
+        self.gen = self.roteiro()
+
+    def montar_fundo(self):
+        w = self.w
+        px = [0] * (w * self.ph)
+        for y in range(self.y0):
+            c = 0x0A0A10 if y < self.y0 - 2 else 0x1A1A22
+            px[y * w:(y + 1) * w] = [c] * w
+        for x in range(4, w, 14):  # refletores na beira do telhado
+            for dy in range(-3, 4):
+                for dx in range(-5, 6):
+                    y = 3 + dy
+                    if 0 <= x + dx < w and 0 <= y < self.y0:
+                        k = round(clamp(1 - math.hypot(dx * 0.6, dy) / 3.5) ** 2 * 4) / 4
+                        px[y * w + x + dx] = misturar(px[y * w + x + dx], 0xFFF6D8, k)
+            for dx in (0, 1):
+                if x + dx < w:
+                    px[3 * w + x + dx] = 0xFFFFF4
+        for r in range(self.lins):
+            s = self.sombra[r]
+            vao, degrau = escala(0x121216, s), escala(0x34343C, s)
+            yb = self.y0 + 4 * r
+            for y in range(yb, yb + 3):
+                px[y * w:(y + 1) * w] = [vao] * w
+            px[(yb + 3) * w:(yb + 4) * w] = [degrau] * w
+        return px
+
+    # --- o que a torcida faz
+
+    def roteiro(self):
+        mosaicos = random.sample(self.MOSAICOS, len(self.MOSAICOS))
+        yield from self.fase_("pulando", random.uniform(3.5, 5))
+        modos = ["ola", "festa", "cachecois", "pulando"]
+        random.shuffle(modos)
+        k = 0
+        while True:
+            yield from self.fazer_mosaico(mosaicos[k % len(mosaicos)])
+            k += 1
+            for m in modos[:2]:
+                yield from self.fase_(m, random.uniform(6, 8))
+            modos = modos[2:] + modos[:2]
+
+    def fase_(self, modo, dur):
+        self.modo, self.modo_t = modo, self.t
+        self.cantar(random.choice(self.CANTOS) if modo != "festa" else "♪ GOOOOOOOOL! ♪")
+        if modo == "festa":
+            for _ in range(160):
+                self.confete.append([random.uniform(0, self.w), random.uniform(-25, 0), random.uniform(-3, 3),
+                                     random.uniform(9, 20), random.choice((ARS_VERMELHO, 0xFFFFFF, 0xFFFFFF, ARS_OURO)),
+                                     random.uniform(0, 6.3), self.t])
+        if modo in ("festa", "cachecois") or random.random() < 0.4:
+            self.acender(random.randint(2, 4))
+        self.bandeiras = []
+        if modo != "ola" and random.random() < 0.75:
+            for _ in range(random.randint(1, 2)):
+                self.bandeiras.append(self.nova_bandeira())
+        yield from self.esperar(dur)
+
+    def fazer_mosaico(self, design):
+        self.modo, self.modo_t = "mosaico", self.t
+        self.bandeiras = []
+        grade = self.montar_mosaico(design)
+        self.mosaico = [grade, self.t + 0.4, self.t + 7.6, [escala(c, 0.8) for c in grade]]
+        self.cantar(design["canto"])
+        yield from self.esperar(9.4)
+        self.mosaico = None
+
+    def cantar(self, txt):
+        self.canto, self.canto_t = txt, self.t
+
+    def acender(self, n):
+        self.flares = []
+        for _ in range(n):
+            r = random.randrange(self.lins // 3, self.lins)
+            c = random.randrange(2, max(3, self.cols - 2))
+            self.flares.append([2 * c + 1, self.y0 + 4 * r, self.t, random.uniform(5, 8)])
+
+    def nova_bandeira(self):
+        fw, fh = random.choice(((22, 12), (26, 13), (20, 11)))
+        tipo = random.choice(("meio", "AFC", "49", "listras"))
+        arte = []
+        g = texto_grade(tipo) if tipo in ("AFC", "49") else None
+        for y in range(fh):
+            linha = []
+            for x in range(fw):
+                if tipo == "meio":
+                    c = ARS_VERMELHO if x < fw // 2 else 0xFFFFFF
+                elif tipo == "listras":
+                    c = ARS_VERMELHO if (y * 3 // fh) != 1 else 0xFFFFFF
+                else:
+                    gx, gy = x - (fw - len(g[0])) // 2, y - (fh - 5) // 2
+                    letra = 0 <= gy < 5 and 0 <= gx < len(g[0]) and g[gy][gx]
+                    fundo_, frente = (ARS_VERMELHO, 0xFFFFFF) if tipo == "AFC" else (0xFFFFFF, ARS_VERMELHO)
+                    c = frente if letra else fundo_
+                linha.append(c)
+            arte.append(linha)
+        x = random.uniform(4, max(5, self.w - fw - 8))
+        y = self.y0 + random.uniform(0.15, 0.5) * 4 * self.lins
+        return [x, y, arte, random.uniform(0, 6.3)]
+
+    def montar_mosaico(self, design):
+        cols, lins = self.cols, self.lins
+        g = [[ARS_VERMELHO] * cols for _ in range(lins)]
+        if lins >= 10:
+            g[0] = [0xFFFFFF] * cols
+            g[-1] = [0xFFFFFF] * cols
+            topo, util = 1, lins - 2
+        else:
+            topo, util = 0, lins
+        if design.get("canhao"):
+            # cada cartão tem 2 pixels de largura e 4 de altura: na vertical cabe metade das unidades
+            k = min((cols - 6) / 40, 2 * (util - 1) / 14)
+            ox, oy = (cols - 40 * k) / 2, topo + (util - 7 * k) / 2
+            for r in range(topo, topo + util):
+                for c in range(cols):
+                    cor_ = canhao_em((c + 0.5 - ox) / k, (r + 0.5 - oy) / (k / 2))
+                    if cor_:
+                        g[r][c] = cor_
+        else:
+            linhas = design["linhas"]
+            un = max(1, int(min(min((cols - 4) / (rel * (6 * len(txt) - 1)) for txt, rel in linhas),
+                                (util - 1) / (sum(5 * rel for _, rel in linhas) + len(linhas) - 1))))
+            alt = sum(5 * rel * un for _, rel in linhas) + (len(linhas) - 1) * un
+            y = topo + (util - alt) // 2
+            letras = set()
+            for txt, rel in linhas:
+                gr = texto_grade(txt, rel * un)
+                x0 = (cols - len(gr[0])) // 2
+                for yy, linha in enumerate(gr):
+                    for xx, v in enumerate(linha):
+                        if v and 0 <= y + yy < lins and 0 <= x0 + xx < cols:
+                            letras.add((y + yy, x0 + xx))
+                y += 5 * rel * un + un
+            if un >= 2:
+                for r, c in letras:
+                    for dr in (-1, 0, 1):
+                        for dc in (-1, 0, 1):
+                            if topo <= r + dr < topo + util and 0 <= c + dc < cols:
+                                g[r + dr][c + dc] = ARS_OURO
+            for r, c in letras:
+                g[r][c] = 0xFFFFFF
+        out = []
+        for r in range(lins):
+            s = round((0.75 + 0.25 * (r + 1) / lins) * 10) / 10
+            for c in range(cols):
+                i = r * cols + c
+                cor_ = g[r][c] if self.part[i] else self.camisa[i]
+                out.append(escala(cor_, s * self.var[i]) if self.part[i] else cor_)
+        return out
+
+    # --- desenho
+
+    def draw(self, t, dt, ch, co):
+        self.t = t
+        next(self.gen)
+        w, h, px = self.w, self.h, self.px
+        px[:] = self.fundo
+        self.desenhar_torcida(px)
+        if self.mosaico is None:
+            for b in self.bandeiras:
+                self.desenhar_bandeira(px, b)
+            self.desenhar_flares(px, dt)
+        self.desenhar_confete(px, dt)
+        topo_clawd = self.desenhar_clawd(px)
+        pixels_para_celulas(px, w, h, ch, co)
+        festa = self.modo == "festa"
+        txt = " GOOOOL DO ARSENAL ★" if festa else " ARSENAL ★ COYG ★ VICTORIA CONCORDIA CRESCIT ★ EMIRATES STADIUM ★"
+        off = int(t * (18 if festa else 8))
+        fg = (0xFFFFFF if int(t * 6) % 2 else 0xFFD84A) if festa else 0xFF3A3A
+        bg = ARS_VERMELHO if festa else 0x1A0303
+        for x in range(w):
+            s = txt[(x + off) % len(txt)]
+            escrever(ch, co, w, h, x, h - 3, NBSP if s == " " else s,
+                     fundo(ARS_OURO if s == "★" and not festa else fg, bg))
+        n = min(len(self.canto), int((t - self.canto_t) * 30) + 1)
+        x = (w - len(self.canto)) // 2
+        brilho = 0.75 + 0.25 * math.sin(t * 4)
+        for k, s in enumerate(self.canto[:n]):
+            escrever(ch, co, w, h, x + k, h - 2, s, escala(ARS_VERMELHO if s == "♪" else 0xFFFFFF, brilho))
+        if t >= self.prox_fala:
+            self.fala, self.fala_t = random.choice(self.FALAS), t
+            self.prox_fala = t + random.uniform(7, 11)
+        if self.fala and t - self.fala_t < 3.2:
+            balao(ch, co, w, h, self.cx + 9 * self.esc, topo_clawd // 2 - 1, self.fala, int((t - self.fala_t) * 30))
+
+    def desenhar_torcida(self, px):
+        w, t, cols = self.w, self.t, self.cols
+        modo = self.modo
+        cam, calca, pele, fase, lado = self.camisa, self.calca, self.pele, self.fase, self.lado
+        mos = self.mosaico
+        idade = t - self.modo_t
+        ola = ((idade * 0.55) % 1.0) * (w + 40) - 20
+        sin = math.sin
+        for r in range(self.lins):
+            yb = self.y0 + 4 * r
+            base_r = r * cols
+            for c in range(cols):
+                i = base_r + c
+                x = 2 * c
+                if mos and self.part[i]:
+                    atraso = (c / cols) * 0.9 + (r / self.lins) * 0.25 + self.atraso[i] * 0.2
+                    tin, tout = mos[1] + atraso, mos[2] + atraso
+                    if tin <= t < tout + 0.12:
+                        if t < tin + 0.12 or t >= tout:  # cartão virando: só a beirada aparece
+                            k = yb * w + x + lado[i]
+                            px[k] = px[k + w] = px[k + 2 * w] = 0xD8D8D8
+                        else:
+                            cor_ = mos[0][i]
+                            k = yb * w + x
+                            px[k] = px[k + 1] = px[k + w] = px[k + w + 1] = px[k + 2 * w] = px[k + 2 * w + 1] = cor_
+                            px[k + 3 * w] = px[k + 3 * w + 1] = mos[3][i]
+                        continue
+                f = fase[i]
+                bracos = False
+                if modo == "pulando":
+                    dy = 1 if sin(t * 7 + f * 6.3) > 0.55 else 0
+                    bracos = dy and f > 0.5
+                elif modo == "festa":
+                    dy = 1 + (sin(t * 13 + f * 40) > 0.2)
+                    bracos = True
+                elif modo == "ola":
+                    d = abs(x - ola)
+                    dy = 2 if d < 3 else 1 if d < 8 else 0
+                    bracos = d < 8
+                elif modo == "cachecois":
+                    dy = 0
+                    bracos = True
+                else:
+                    dy = 1 if sin(t * 3 + f * 6.3) > 0.9 else 0
+                y = yb - dy - self.alto[i]
+                k = y * w + x
+                px[k + lado[i]] = pele[i]
+                if bracos:
+                    px[k + 1 - lado[i]] = pele[i]
+                px[k + w] = px[k + w + 1] = cam[i]
+                px[k + 2 * w] = px[k + 2 * w + 1] = calca[i]
+                if modo == "cachecois" and yb > self.y0:
+                    listra = ((x + int(sin(t * 2.2 + r * 0.8) * 2.5)) // 3 + r) % 2
+                    px[k - w] = px[k - w + 1] = escala(ARS_VERMELHO if listra else 0xFFFFFF, self.sombra[r])
+
+    def desenhar_bandeira(self, px, b):
+        w, ph, t = self.w, self.ph, self.t
+        x0, y0, arte, fase = b
+        fh, fw = len(arte), len(arte[0])
+        xi, yi = int(x0), int(y0)
+        for y in range(yi - 3, yi + fh + 8):  # mastro
+            if 0 <= y < ph and 0 <= xi - 1 < w:
+                px[y * w + xi - 1] = 0x9A9A9A
+        for x in range(fw):
+            onda = math.sin(t * 4.5 - x * 0.45 + fase)
+            dy = int(round(onda * 1.6 * (x + 1) / fw))
+            luz = 0.8 + 0.2 * math.cos(t * 4.5 - x * 0.45 + fase)
+            for y in range(fh):
+                X, Y = xi + x, yi + y + dy
+                if 0 <= X < w and 0 <= Y < ph:
+                    px[Y * w + X] = escala(arte[y][x], luz)
+
+    def desenhar_flares(self, px, dt):
+        w, ph, t = self.w, self.ph, self.t
+        vivos = []
+        for f in self.flares:
+            x, y, t0, dur = f
+            if t - t0 > dur:
+                continue
+            vivos.append(f)
+            pisca = 0.75 + 0.25 * math.sin(t * 37 + x)
+            for dy in range(-5, 6):
+                for dx in range(-7, 8):
+                    X, Y = x + dx, y + dy
+                    if 0 <= X < w and 0 <= Y < ph:
+                        k = 1 - math.hypot(dx * 0.7, dy) / 5.2
+                        if k > 0:
+                            px[Y * w + X] = misturar(px[Y * w + X], 0xFF3020, k * 0.85 * pisca)
+            for X, Y in ((x, y), (x + 1, y), (x, y + 1)):
+                if 0 <= X < w and 0 <= Y < ph:
+                    px[Y * w + X] = misturar(0xFFF4E0, 0xFF8060, 1 - pisca)
+            if random.random() < dt * 6:
+                self.fumaca.append([x + random.uniform(-1, 1), float(y), random.uniform(-2, 2) + self.vento,
+                                    -random.uniform(6, 11), t, random.uniform(2.5, 3.5)])
+        self.flares = vivos
+        vivas = []
+        for s in self.fumaca:
+            idade = (t - s[4]) / s[5]
+            if idade >= 1:
+                continue
+            vivas.append(s)
+            s[0] += s[2] * dt
+            s[1] += s[3] * dt
+            r = 1.2 + idade * 3.6
+            cor_ = misturar(0xE04858, 0x8A7A80, idade)
+            a = 0.5 * (1 - idade)
+            na = 1 - a
+            cr, cg, cb = ((cor_ >> 16) & 255) * a, ((cor_ >> 8) & 255) * a, (cor_ & 255) * a
+            for Y in range(max(0, int(s[1] - r)), min(ph, int(s[1] + r) + 1)):
+                dy2 = (Y - s[1]) ** 2
+                for X in range(max(0, int(s[0] - r)), min(w, int(s[0] + r) + 1)):
+                    if (X - s[0]) ** 2 + dy2 <= r * r:
+                        q = px[Y * w + X]
+                        px[Y * w + X] = (int(((q >> 16) & 255) * na + cr) << 16) | (int(((q >> 8) & 255) * na + cg) << 8) \
+                            | int((q & 255) * na + cb)
+        self.fumaca = vivas
+
+    def desenhar_confete(self, px, dt):
+        w, ph, t = self.w, self.ph, self.t
+        vivos = []
+        for c in self.confete:
+            c[0] += (c[2] + math.sin(t * 4 + c[5]) * 5) * dt
+            c[1] += c[3] * dt
+            if c[1] < self.base and t - c[6] < 8:
+                vivos.append(c)
+                x, y = int(c[0]), int(c[1])
+                if 0 <= x < w and 0 <= y < ph:
+                    px[y * w + x] = c[4]
+        self.confete = vivos
+
+    def desenhar_clawd(self, px):
+        """Clawd na primeira fila, de cachecol do Arsenal. Devolve a linha (em pixels) do topo da cabeça."""
+        w, ph, t, s = self.w, self.ph, self.t, self.esc
+        if self.modo == "festa":
+            pulo = int(abs(math.sin(t * 7)) * 4 * s)
+        elif self.modo in ("pulando", "cachecois", "ola"):
+            pulo = int(abs(math.sin(t * 3.5)) * 1.6 * s)
+        else:
+            pulo = 0
+        y0 = self.base - 10 * s - pulo
+        arte = arte_clawd(fechados=(t % 4.4) < 0.14)
+        olhos = arte[1]
+        a, b = olhos.index("#"), olhos.rindex("#")
+        arte[1] = olhos[:a] + olhos[a:b].replace(".", "o") + olhos[b:]
+        pix = arte_pixels(arte, self.cx, y0, s, dict(CORES_CLAWD, o=0x0A0A0A), ey=2 * s)
+        yc = y0 + 4 * s
+        for xx in range(self.cx + s, self.cx + 17 * s):
+            pix[(xx, yc)] = ARS_VERMELHO if ((xx - self.cx) // (2 * s)) % 2 == 0 else 0xFFFFFF
+        for k in range(1, 5 * s):
+            pix[(self.cx + 13 * s + (1 if k > 2 * s else 0), yc + k)] = ARS_VERMELHO if (k // s) % 2 else 0xFFFFFF
+        for (x, y), c in pix.items():
+            if 0 <= x < w and 0 <= y < ph:
+                px[y * w + x] = c
+        return y0
+
+
+# o galo (do Tottenham, claro), olhando pra esquerda: N = azul-marinho, n = sombra, L = brilho, Y = bico e pés
+GALO = ["..L.L.L.............",
+        "..LLLLL.............",
+        "..NNNNN.......LLL...",
+        ".NNWNNN......LNNNL..",
+        "YNNKNNN.....LN...NL.",
+        "YYYNNNN....LN.LL..N.",
+        ".YLNNNN...LN.LNNL.N.",
+        "..LLNNN...N.LN..N...",
+        "...NNNNN.NN.N...N...",
+        "..NNNNNNNNNNN.......",
+        ".NNNNNNNNNNNN.......",
+        ".NNLnnnnnNNNN.......",
+        ".NNNnnnnnnNNN.......",
+        "..NNNnnnnnNN........",
+        "...NNNNNNNNN........",
+        ".....NNNNN..........",
+        "......Y..Y..........",
+        "......Y..Y..........",
+        ".....YY.YY.........."]
+GALO_CANTA = GALO[:4] + ["YYNKNNN.....LN...NL.", "...NNNN....LN.LL..N.", "YYLNNNN...LN.LNNL.N."] + GALO[7:]
+CORES_GALO = {"N": 0x22336E, "n": 0x141E44, "L": 0x4A62A8, "W": 0xFFFFFF, "K": 0x000000, "Y": 0xF2B33D}
+BOLINHA = ([".WW.", "WKWW", "WWKW", ".WW."], [".WW.", "WWKW", "WKWW", ".WW."])  # bola de futebol girando
+
+
+class Canhao(Cena):
+    """O canhão do Arsenal contra o galo do Tottenham (e, de vez em quando, o dirigível do City)."""
+    combinavel = False
+    peso = 0.8
+    duracao = (35, 50)
+    PROVOCA = ["Cocoricó!", "Esse ano vai!", "Ano que vem é nosso!", "Ganhamos a Europa League, tá?",
+               "Ninguém me derruba!", "Pode vir, Arsenal!", "Hoje não, hoje sim..."]
+    APANHOU = ["CÓÓÓ!", "Foi pênalti!", "Ai, ai...", "Vou chamar o VAR!", "Isso não vale!"]
+    ERROU = ["Errou! Cocoricó!", "Passou longe!", "Mira torta, hein?"]
+
+    def iniciar(self):
+        w, h = self.w, self.h
+        ph = self.ph = 2 * h
+        self.chao = ph - 8
+        self.k = max(0.8, min(3.0, w * 0.42 / 40, ph * 0.36 / 14))
+        self.sg = 2 if ph >= 120 and w >= 240 else 1
+        self.ox = max(2.0, w * 0.04)
+        self.oy = self.chao - 13.8 * self.k
+        self.ang, self.giro, self.recuo = CANHAO_ANG, 0.0, 0.0
+        self.cache = None
+        self.g = ph * 1.0
+        self.rb = 5 * self.sg + 1
+        self.gw, self.gh = len(GALO[0]) * self.sg, len(GALO) * self.sg
+        self.bola_x = w * 0.78  # bola em que o galo se equilibra
+        self.galo = [self.bola_x, float(self.chao - 2 * self.rb), 0.0, 0.0, "bola", 0.0]  # x, y dos pés, vx, vy, estado, desde
+        self.tiro = None        # [x, y, vx, vy, alvo]
+        self.solta = None       # bola quicando depois de bater no galo
+        self.disparo = -10.0
+        self.fundo = self.montar_fundo()
+        self.px = [0] * (w * ph)
+        self.parts = []         # [x, y, vx, vy, cor, t0, vida, tipo]
+        self.placar = [random.choice((0, 0, 1, 2)), 0]
+        self.dirigivel = None
+        self.prox_dirigivel = random.uniform(5, 10)  # o City sempre aparece pra apanhar
+        self.fala, self.fala_t = "", -10.0
+        self.status = ""
+        self.bum = None
+        self.t = 0.0
+        self.gen = self.roteiro()
+
+    def montar_fundo(self):
+        w, ph, chao = self.w, self.ph, self.chao
+        px = [0] * (w * ph)
+        self.ceu = []
+        for y in range(chao):
+            f = y / max(1, chao - 1)
+            c = misturar(0x0A0820, 0x3A1640, f / 0.55) if f < 0.55 else misturar(0x3A1640, 0xE0703A, (f - 0.55) / 0.45)
+            self.ceu.append(c)
+            px[y * w:(y + 1) * w] = [c] * w
+        for _ in range(w * chao // 90):
+            y, x = int(random.random() ** 2 * chao * 0.5), random.randrange(w)
+            px[y * w + x] = misturar(px[y * w + x], 0xFFFFFF, random.uniform(0.4, 0.9))
+        # o Emirates no horizonte: silhueta com a coroa de luzes acesa
+        cx, larg, alt = w * 0.6, w * 0.62, max(7.0, ph * 0.1)
+        for x in range(max(0, int(cx - larg / 2)), min(w, int(cx + larg / 2) + 1)):
+            dx = (x - cx) / (larg / 2)
+            top = int(chao - alt * math.sqrt(max(0.0, 1 - dx ** 6)))
+            for y in range(max(0, top - 8), top):
+                px[y * w + x] = misturar(px[y * w + x], 0xFFE8C0, (1 - (top - y) / 8) ** 2 * 0.55)
+            for y in range(max(0, top), chao):
+                px[y * w + x] = 0x3A2A40 if y <= top + 1 else 0x2C1C34 if x % 5 == 0 else 0x22142A
+            if x % 3 == 0 and top >= 0:
+                px[top * w + x] = 0xFFF4D8
+        letreiro(px, w, ph, "ARSENAL", cx, chao - alt * 0.45, 1, ARS_VERMELHO)
+        for y in range(chao, ph):
+            f = (y - chao) / max(1, ph - chao - 1)
+            for x in range(w):
+                px[y * w + x] = escala(0x2E6B2A if (x // 12) % 2 else 0x347A30, 0.6 + 0.4 * f)
+        return px
+
+    # --- mira e disparo
+
+    def boca(self, ang=None):
+        ang = self.ang if ang is None else ang
+        x0 = self.ox + self.recuo
+        return x0 + 13.5 * self.k + 22.5 * self.k * math.cos(ang), self.oy + 5.0 * self.k + 22.5 * self.k * math.sin(ang)
+
+    def mirar(self, tx, ty, T):
+        """Ângulo do cano e velocidade de saída pra bola chegar em (tx, ty) em T segundos."""
+        ang = self.ang
+        for _ in range(3):
+            bx, by = self.boca(ang)
+            vx, vy = (tx - bx) / T, (ty - by - 0.5 * self.g * T * T) / T
+            ang = max(-1.1, min(0.05, math.atan2(vy, vx)))
+        return ang, vx, vy
+
+    def falar(self, txt):
+        self.fala, self.fala_t = txt, self.t
+
+    def roteiro(self):
+        yield from self.esperar(random.uniform(1.0, 2.0))
+        while True:
+            d = self.dirigivel
+            if d and d["estado"] == "voando" and self.w * 0.45 < d["x"] < self.w * 0.8:
+                T = 0.8
+                tx = d["x"] + d["vx"] * (T + 1.6)
+                yield from self.disparar(tx, d["y"], T, "dirigivel")
+                yield from self.esperar(1.0)
+                continue
+            if self.galo[4] != "bola":
+                yield
+                continue
+            if random.random() < 0.6:
+                self.falar(random.choice(self.PROVOCA))
+            yield from self.esperar(random.uniform(1.2, 2.4))
+            if self.galo[4] != "bola":
+                continue
+            acerta = random.random() < 0.72
+            tx, ty = self.galo[0], self.galo[1] - self.gh * 0.5
+            if not acerta:
+                ty -= self.gh * 0.8 + random.uniform(4, 10)
+            yield from self.disparar(tx, ty, random.uniform(0.7, 0.9), "galo" if acerta else "nada")
+            yield from self.esperar(random.uniform(0.6, 1.2))
+
+    def disparar(self, tx, ty, T, alvo):
+        self.status = "mirando…"
+        ang, vx, vy = self.mirar(tx, ty, T)
+        a0, ini = self.ang, self.t
+        while self.t - ini < 0.9:
+            self.ang = a0 + (ang - a0) * suave((self.t - ini) / 0.9)
+            yield
+        self.ang = ang
+        self.status = "acendendo o pavio…"
+        ini = self.t
+        while self.t - ini < 0.7:
+            c, sn = math.cos(self.ang), math.sin(self.ang)
+            x0, y0 = self.ox + self.recuo + 13.5 * self.k, self.oy + 5.0 * self.k
+            fx, fy = x0 - 7.0 * self.k * c + 2.3 * self.k * sn, y0 - 7.0 * self.k * sn - 2.3 * self.k * c
+            for _ in range(2):
+                self.parts.append([fx, fy, random.uniform(-14, 14), random.uniform(-22, -4),
+                                   random.choice((0xFFF2A0, 0xFFB040, 0xFF6020)), self.t, random.uniform(0.2, 0.45), "faisca"])
+            yield
+        bx, by = self.boca()
+        self.tiro = [bx, by, vx, vy, alvo]
+        self.disparo = self.t
+        self.status = "FOGO!"
+        self.bum = (bx, by, self.t)
+        for _ in range(26):
+            a = self.ang + random.uniform(-0.6, 0.6)
+            sp = random.uniform(8, 34)
+            self.parts.append([bx, by, math.cos(a) * sp, math.sin(a) * sp - 4, 0x9A9298, self.t, random.uniform(1.0, 2.0),
+                               "fumaca"])
+        while self.tiro:
+            yield
+        self.status = ""
+
+    # --- atualização
+
+    def atualizar(self, dt):
+        t, w = self.t, self.w
+        if t - self.disparo < 0.9:
+            p = t - self.disparo
+            self.recuo = -5 * self.k * (p / 0.06 if p < 0.06 else 1 - suave((p - 0.06) / 0.8))
+        else:
+            self.recuo = 0.0
+        self.giro = self.recuo / (4.2 * self.k)
+        if self.tiro:
+            b = self.tiro
+            b[3] += self.g * dt
+            b[0] += b[2] * dt
+            b[1] += b[3] * dt
+            self.parts.append([b[0], b[1], 0.0, 0.0, 0xFFFFFF, t, 0.25, "rastro"])
+            gx, gy = self.galo[0], self.galo[1]
+            d = self.dirigivel
+            if b[4] == "galo" and abs(b[0] - gx) < self.gw * 0.45 and gy - self.gh <= b[1] <= gy:
+                self.acertou_galo(b)
+            elif b[4] == "dirigivel" and d and d["estado"] == "voando" and \
+                    ((b[0] - d["x"]) / (d["L"] / 2 + 2)) ** 2 + ((b[1] - d["y"]) / (d["H"] / 2 + 2)) ** 2 <= 1:
+                self.acertou_dirigivel(b)
+            elif b[1] >= self.chao - 2 and b[3] > 0:
+                if b[4] == "nada" and self.galo[4] == "bola":
+                    self.falar(random.choice(self.ERROU))
+                self.solta = [b[0], float(self.chao - 2), b[2] * 0.6, -b[3] * 0.4, t]
+                self.tiro = None
+            elif b[0] > w + 6 or b[0] < -6 or b[1] < -self.ph:
+                self.tiro = None
+        if self.solta:
+            s = self.solta
+            s[3] += self.g * dt
+            s[0] += s[2] * dt
+            s[1] += s[3] * dt
+            if s[1] >= self.chao - 2 and s[3] > 0:
+                s[1], s[3], s[2] = self.chao - 2.0, -s[3] * 0.45, s[2] * 0.8
+            if t - s[4] > 2.5 or s[0] > w + 4 or s[0] < -4:
+                self.solta = None
+        self.atualizar_galo(dt)
+        self.atualizar_dirigivel(dt)
+
+    def acertou_galo(self, b):
+        t = self.t
+        self.placar[0] += 1
+        gx, gy = self.galo[0], self.galo[1] - self.gh * 0.55
+        for _ in range(34):
+            a = random.uniform(0, 2 * math.pi)
+            sp = random.uniform(10, 45)
+            self.parts.append([gx, gy, math.cos(a) * sp, math.sin(a) * sp - 15,
+                               random.choice((0x22336E, 0x4A62A8, 0x141E44, 0xFFFFFF)), t, random.uniform(2.5, 4), "pena"])
+        self.galo[2], self.galo[3] = min(26.0, b[2] * 0.2 + 12), -self.g * 0.4
+        self.galo[4], self.galo[5] = "voando", t
+        self.solta = [b[0], b[1], -b[2] * 0.25, -abs(b[3]) * 0.3 - 20, t]
+        self.tiro = None
+        self.falar(random.choice(self.APANHOU))
+
+    def acertou_dirigivel(self, b):
+        d = self.dirigivel
+        d["estado"], d["t"] = "murchando", self.t
+        d["vx"], d["vy"] = random.uniform(-80, 80), random.uniform(-60, -20)
+        self.placar[1] += 1
+        self.tiro = None
+        for _ in range(20):
+            a = random.uniform(0, 2 * math.pi)
+            self.parts.append([b[0], b[1], math.cos(a) * 25, math.sin(a) * 25, 0x6CABDD, self.t, 0.8, "faisca"])
+        if self.galo[4] == "bola":
+            self.falar(random.choice(("Até o City apanha!", "Ih, era o dirigível do City.", "Coitado do City.")))
+
+    def atualizar_galo(self, dt):
+        g, t = self.galo, self.t
+        est = g[4]
+        topo_bola = float(self.chao - 2 * self.rb)
+        if est == "bola":
+            g[0] = self.bola_x + math.sin(t * 1.7) * 1.5
+            g[1] = topo_bola
+        elif est == "voando":
+            g[3] += self.g * dt
+            g[0] = min(self.w - self.gw * 0.6, g[0] + g[2] * dt)
+            g[1] += g[3] * dt
+            if g[1] >= self.chao and g[3] > 0:
+                g[1], g[4], g[5] = float(self.chao), "caido", t
+        elif est == "caido":
+            if t - g[5] > 2.6:
+                g[4], g[5] = "voltando", t
+        elif est == "voltando":
+            alvo = self.bola_x + self.gw * 0.6
+            g[0] += max(-20 * dt, min(20 * dt, alvo - g[0]))
+            if abs(g[0] - alvo) < 0.5:
+                g[4], g[5], g[2] = "subindo", t, g[0]
+        elif est == "subindo":
+            p = min(1.0, (t - g[5]) / 0.45)
+            g[0] = g[2] + (self.bola_x - g[2]) * p
+            g[1] = self.chao + (topo_bola - self.chao) * p - math.sin(p * math.pi) * self.gh * 0.5
+            if p >= 1:
+                g[4], g[5] = "bola", t
+                if random.random() < 0.5:
+                    self.falar(random.choice(("Não doeu.", "Cocoricó!", "Tô de volta!")))
+
+    def atualizar_dirigivel(self, dt):
+        t, w = self.t, self.w
+        if self.dirigivel is None and t >= self.prox_dirigivel:
+            L, H = 40 * self.sg, 13 * self.sg
+            self.dirigivel = {"x": w + L / 2 + 2, "y": self.ph * random.uniform(0.14, 0.26), "vx": -random.uniform(8, 11),
+                              "vy": 0.0, "L": L, "H": H, "estado": "voando", "t": t, "esc": 1.0}
+            self.prox_dirigivel = t + random.uniform(18, 28)
+        d = self.dirigivel
+        if not d:
+            return
+        if d["estado"] == "voando":
+            d["x"] += d["vx"] * dt
+            d["y"] += math.sin(t * 0.8) * 1.5 * dt
+            if d["x"] < -d["L"]:
+                self.dirigivel = None
+        else:
+            p = t - d["t"]
+            d["esc"] = max(0.3, 1 - p * 0.35)
+            if random.random() < dt * 4:
+                a = random.uniform(0, 2 * math.pi)
+                d["vx"], d["vy"] = math.cos(a) * 90, math.sin(a) * 60 - 15
+            d["x"] += d["vx"] * dt
+            d["y"] += d["vy"] * dt
+            if random.random() < dt * 20:
+                self.parts.append([d["x"], d["y"], -d["vx"] * 0.2, -d["vy"] * 0.2, 0xC8D8E8, t, 0.6, "fumaca"])
+            if p > 3.2 or d["x"] < -60 or d["x"] > w + 60 or d["y"] < -60:
+                self.dirigivel = None
+
+    # --- desenho
+
+    def draw(self, t, dt, ch, co):
+        self.t = t
+        next(self.gen)
+        self.atualizar(dt)
+        w, h, ph = self.w, self.h, self.ph
+        px = self.px
+        px[:] = self.fundo
+        self.desenhar_dirigivel(px)
+        self.desenhar_municao(px)
+        self.desenhar_bola_do_galo(px)
+        self.desenhar_galo(px)
+        self.desenhar_canhao(px)
+        self.desenhar_parts(px, dt)
+        for b in (self.tiro, self.solta):
+            if b:
+                quadro = BOLINHA[int(t * 12) % 2]
+                for (x, y), c in arte_pixels(quadro, int(b[0]) - 2, int(b[1]) - 2, 1, {"W": 0xFFFFFF, "K": 0x202020}).items():
+                    if 0 <= x < w and 0 <= y < ph:
+                        px[y * w + x] = c
+        if self.bum and t - self.bum[2] < 0.7:
+            bx, by, t0 = self.bum
+            r = 7 * self.k * (1 - (t - t0) / 0.15) if t - t0 < 0.15 else 0
+            for y in range(int(by - r), int(by + r) + 1):
+                for x in range(int(bx - r), int(bx + r) + 1):
+                    if 0 <= x < w and 0 <= y < ph and (x - bx) ** 2 + (y - by) ** 2 <= r * r:
+                        px[y * w + x] = misturar(0xFFF8D0, 0xFFA030, math.hypot(x - bx, y - by) / max(1, r))
+            letreiro(px, w, ph, "BUM!", bx + 6, by - 9 - (t - t0) * 6, 2 if ph >= 70 else 1, 0xFFE040, ARS_VERMELHO)
+        pixels_para_celulas(px, w, h, ch, co)
+        x = chip(ch, co, w, h, 2, 1, " CANHÃO ", 0xFFFFFF, ARS_VERMELHO)
+        x = chip(ch, co, w, h, x, 1, f" {self.placar[0]} x 0 ", 0xFFFFFF, 0x1C1C1C)
+        x = chip(ch, co, w, h, x, 1, " GALO ", 0xFFFFFF, 0x22336E)
+        if self.placar[1]:
+            txt = f"  dirigíveis do City: {self.placar[1]}"
+            for k, s in enumerate(txt):
+                if x + k < w:
+                    escrever(ch, co, w, h, x + k, 1, NBSP if s == " " else s, fundo(0x6CABDD, self.ceu[2]))
+        if self.status:
+            x0 = w - len(self.status) - 2
+            for k, s in enumerate(self.status):
+                cor_ = 0xFFD84A if self.status == "FOGO!" else 0xB0A8C0
+                escrever(ch, co, w, h, x0 + k, 1, NBSP if s == " " else s, fundo(cor_, self.ceu[2]))
+        if self.fala and t - self.fala_t < 3.0:
+            g = self.galo
+            balao(ch, co, w, h, int(g[0]), int(g[1] - self.gh) // 2 - 1, self.fala, int((t - self.fala_t) * 30))
+
+    def desenhar_canhao(self, px):
+        w, ph, k = self.w, self.ph, self.k
+        x0 = self.ox + round(self.recuo)
+        chave = (round(self.ang / 0.025), round(self.giro, 1), x0)
+        if self.cache is None or self.cache[0] != chave:
+            pix = []
+            for y in range(max(0, int(self.oy - 18 * k)), min(ph, self.chao + 1)):
+                for x in range(max(0, int(x0 - 2 * k)), min(w, int(x0 + 42 * k) + 1)):
+                    c = canhao_em((x + 0.5 - x0) / k, (y + 0.5 - self.oy) / k, self.ang, self.giro)
+                    if c:
+                        pix.append((y * w + x, c))
+            self.cache = (chave, pix)
+        for i, c in self.cache[1]:
+            px[i] = c
+
+    def desenhar_municao(self, px):
+        w, ph, k = self.w, self.ph, self.k
+        cores = {"W": 0xF0F0F0, "K": 0x202020}
+        for fila, n in ((0, 3), (1, 2), (2, 1)):
+            for i in range(n):
+                x = int(self.ox + 25 * k + i * 5 + fila * 2.5)
+                y = self.chao - 4 - fila * 4
+                for (xx, yy), c in arte_pixels(BOLINHA[(i + fila) % 2], x, y, 1, cores).items():
+                    if 0 <= xx < w and 0 <= yy < ph:
+                        px[yy * w + xx] = c
+
+    def desenhar_bola_do_galo(self, px):
+        w, ph, r = self.w, self.ph, self.rb
+        cx, cy = self.bola_x + math.sin(self.t * 1.7) * 0.8, self.chao - r
+        giro = math.sin(self.t * 1.7) * 0.4
+        gomos = [(0.0, 0.0)] + [(math.cos(a + giro) * r * 0.62, math.sin(a + giro) * r * 0.62)
+                                for a in [k * 2 * math.pi / 5 - math.pi / 2 for k in range(5)]]
+        for y in range(int(cy - r) - 1, int(cy + r) + 2):
+            for x in range(int(cx - r) - 1, int(cx + r) + 2):
+                dx, dy = x + 0.5 - cx, y + 0.5 - cy
+                if 0 <= x < w and 0 <= y < ph and dx * dx + dy * dy <= r * r:
+                    if any((dx - gx) ** 2 + (dy - gy) ** 2 <= (r * 0.2) ** 2 for gx, gy in gomos):
+                        c = 0x1A1A1A
+                    else:
+                        c = escala(0xF4F4F4, 0.72 + 0.28 * clamp(0.5 - (dx + dy) / (2 * r)))
+                    px[y * w + x] = c
+
+    def desenhar_galo(self, px):
+        w, ph, t, sg = self.w, self.ph, self.t, self.sg
+        x, y, vx, vy, est, desde = self.galo
+        cantando = est == "bola" and self.fala in ("Cocoricó!", "Errou! Cocoricó!") and t - self.fala_t < 1.0
+        arte = list(GALO_CANTA if cantando and int(t * 6) % 2 else GALO)
+        if est == "caido" or (est == "voando" and t - desde > 0.12):
+            arte = arte[::-1]
+        if est == "voltando":
+            y -= int(t * 8) % 2
+        for (xx, yy), c in arte_pixels(arte, int(x - self.gw / 2), int(y - self.gh), sg, CORES_GALO).items():
+            if 0 <= xx < w and 0 <= yy < ph:
+                px[yy * w + xx] = c
+        if est == "caido":
+            cx, cy = x, y - self.gh - 2
+            for k in range(3):
+                a = t * 4 + k * 2.1
+                sx, sy = int(cx + math.cos(a) * self.gw * 0.45), int(cy + math.sin(a) * 2.5)
+                for dx, dy, c in ((0, 0, 0xFFFFFF), (-1, 0, 0xFFD84A), (1, 0, 0xFFD84A), (0, -1, 0xFFD84A), (0, 1, 0xFFD84A)):
+                    if 0 <= sx + dx < w and 0 <= sy + dy < ph:
+                        px[(sy + dy) * w + sx + dx] = c
+
+    def desenhar_dirigivel(self, px):
+        d = self.dirigivel
+        if not d:
+            return
+        w, ph = self.w, self.ph
+        a, b = d["L"] / 2 * d["esc"], d["H"] / 2 * d["esc"]
+        cx, cy = d["x"], d["y"]
+        for y in range(int(cy - b) - 1, int(cy + b) + 2):
+            for x in range(int(cx - a) - 1, int(cx + a + a * 0.3) + 2):
+                if not (0 <= x < w and 0 <= y < ph):
+                    continue
+                nx, ny = (x + 0.5 - cx) / a, (y + 0.5 - cy) / b
+                if nx * nx + ny * ny <= 1:
+                    px[y * w + x] = escala(0x6CABDD, 0.7 + 0.45 * clamp(0.5 - ny * 0.8))
+                elif nx > 0.7 and abs(ny) < (nx - 0.7) * 1.6 and nx < 1.25 and abs(ny) > 0.25:
+                    px[y * w + x] = 0x1C2C5B  # lemes
+        gy = int(cy + b)
+        for x in range(int(cx - a * 0.2), int(cx + a * 0.2) + 1):
+            for y in (gy, gy + 1):
+                if 0 <= x < w and 0 <= y < ph:
+                    px[y * w + x] = 0x1C2C5B
+        if d["estado"] == "voando":
+            letreiro(px, w, ph, "CITY", cx, cy, 1, 0x1C2C5B)
+        elif int(self.t * 8) % 2:
+            letreiro(px, w, ph, "PFFFRRRT!", cx, max(4, cy - b - 6), 1, 0xFFFFFF)
+
+    def desenhar_parts(self, px, dt):
+        w, ph, t = self.w, self.ph, self.t
+        vivas = []
+        for p in self.parts:
+            idade = (t - p[5]) / p[6]
+            if idade >= 1:
+                continue
+            vivas.append(p)
+            tipo = p[7]
+            if tipo == "pena":
+                p[2] *= 1 - 2.5 * dt
+                p[3] += (7 - p[3]) * 2.5 * dt
+                p[0] += (p[2] + math.sin(t * 5 + p[5] * 13) * 6) * dt
+            elif tipo == "fumaca":
+                p[2] *= 1 - 1.5 * dt
+                p[3] = p[3] * (1 - 1.5 * dt) - 6 * dt
+                p[0] += p[2] * dt
+            else:
+                p[3] += 40 * dt if tipo == "faisca" else 0
+                p[0] += p[2] * dt
+            p[1] += p[3] * dt
+            x, y = int(p[0]), int(p[1])
+            if tipo == "fumaca":
+                r = 1 + idade * 4 * self.k
+                a = 0.55 * (1 - idade)
+                for yy in range(max(0, int(p[1] - r)), min(ph, int(p[1] + r) + 1)):
+                    for xx in range(max(0, int(p[0] - r)), min(w, int(p[0] + r) + 1)):
+                        if (xx - p[0]) ** 2 + (yy - p[1]) ** 2 <= r * r:
+                            px[yy * w + xx] = misturar(px[yy * w + xx], p[4], a)
+            elif 0 <= x < w and 0 <= y < min(ph, self.chao + (6 if tipo == "pena" else 0)):
+                px[y * w + x] = p[4] if tipo != "rastro" else misturar(px[y * w + x], 0xFFFFFF, 0.5 * (1 - idade))
+        self.parts = vivas
+
+
+# jogador de lado (olhando pra direita), 6x11: k = cabelo, s = pele, m = manga, c = camisa, w = calção, p = meião, b = chuteira
+CORPO_LADO = [".kkk..", ".kkss.", "..ss..", ".mccm.", "mmccmm", "s.cc.s", "..cc..", "..ww.."]
+PERNAS_LADO = {"parado": ["..ss..", "..ss..", "..pp..", ".bbb.."],
+               "corre1": [".s..s.", ".s..s.", "p...p.", "b....b"],
+               "corre2": ["..ss..", "..s.s.", ".p.p..", ".bb.b."],
+               "chuta": ["..ss..", "..s.ss", "..p..p", ".bb..b"],
+               "pulo": ["..ss..", ".ss...", "pp....", "b....."]}
+BRACOS_CIMA = [".kkk..", ".kkss.", "s.ss.s", "smccms", ".mccm.", "..cc..", "..cc..", "..ww.."]
+DEITADO = ["......", "......", "......", "......", "......", "......", "......", "......",
+           "kk....", "kssmcc", "..mcccwwsspb"]
+
+
+class Escanteio(Cena):
+    """Gol de escanteio do Gabriel Magalhães, com câmera de lado (estilo Futebol Brasileiro 96 / ISS) e replay."""
+    combinavel = False
+    peso = 0.8
+    duracao = (35, 50)
+    DUR = 16.0   # cada lance: armação, cobrança, gol, festa e replay
+    EXTRAS = ["Bola parada é com ele!", "O zagueiro artilheiro!", "Subiu mais que todo mundo!",
+              "Ninguém segura o Gabriel na bola aérea.", "De novo! Escanteio do Arsenal é meio gol."]
+
+    def iniciar(self):
+        w, h = self.w, self.h
+        ph = self.ph = 2 * h
+        self.e = 2 if ph >= 150 and w >= 280 else 1
+        # câmera de lado com perspectiva leve: Z = profundidade (0 = lateral perto da câmera), X = 0 na linha de fundo.
+        # Y0(Z) = C·p(Z) é a linha da tela "absoluta"; a câmera anda em Z (panorâmica) somando um deslocamento.
+        self.D = 90.0
+        self.C = 0.72 * ph / (self.D / (13.84 + self.D) - self.D / (54.16 + self.D))
+        self.Sx = w / 34.8 / (self.D / (34 + self.D))
+        self.Sy = self.Sx * 0.9
+        self.Xc = -9.7
+        self.cam = 0.0
+        self.rival = RIVAIS["TOT"] if random.random() < 0.6 else RIVAIS["MCI"]
+        self.fundo = self.montar_fundo()
+        self.px = [0] * (w * ph)
+        self.gols = [random.choice((0, 1, 1, 2)), 0]
+        self.min0 = random.uniform(55, 75)
+        self.n = -1
+        self.t = 0.0
+        self.confete = []
+        self.novo_lance(0.0)
+
+    def tela(self, X, Y, Z):
+        p = self.D / (Z + self.D)
+        return self.w / 2 + (X - self.Xc) * self.Sx * p, self.C * p - self.cam - Y * self.Sy * p
+
+    def mirar_camera(self, tau):
+        """Panorâmica: começa na bandeirinha, acompanha a bola até a área e volta pra festa perto da câmera."""
+        if tau < 2.2:
+            zc = 12.0
+        elif tau < 4.6:
+            zc = 12.0 + 24.0 * suave((tau - 2.2) / 1.6)
+        else:
+            zc = 36.0 - 15.0 * suave((tau - 4.8) / 2.4)
+        self.cam = int(self.C * self.D / (zc + self.D) - self.ph / 2)
+
+    def montar_fundo(self):
+        """Gramado e linhas numa faixa alta (do Z = -6 ao 66); cada quadro recorta a parte que a câmera vê."""
+        w = self.w
+        D, C, Sx = self.D, self.C, self.Sx
+        self.y_min = int(C * D / (66 + D)) - self.ph
+        y_max = int(C * D / (-6 + D)) + self.ph
+        px = []
+        for ya in range(self.y_min, y_max):
+            p = (ya + 0.5) / C
+            Z = D / p - D
+            for x in range(w):
+                X = self.Xc + (x + 0.5 - w / 2) / (Sx * p)
+                listra = int((X + 200) // 4) % 2
+                c = escala(0x37913B if listra else 0x2F7D33, 0.78 + 0.22 * (1 - Z / 68))
+                tx = 0.55 / (Sx * p)
+                tz = 0.6 * D / (p * p * C)
+                linha = (abs(Z) < tz or abs(Z - 68) < tz or
+                         (abs(X) < tx and 0 <= Z <= 68) or
+                         (abs(X + 16.5) < tx and 13.84 <= Z <= 54.16) or
+                         (abs(X + 5.5) < tx and 24.84 <= Z <= 43.16) or
+                         (min(abs(Z - 13.84), abs(Z - 54.16)) < tz and -16.5 <= X <= 0) or
+                         (min(abs(Z - 24.84), abs(Z - 43.16)) < tz and -5.5 <= X <= 0) or
+                         (X < -16.5 and abs(math.hypot(X + 11, (Z - 34)) - 9.15) < max(tx, tz)) or
+                         (abs(X + 11) < tx * 1.5 and abs(Z - 34) < tz * 1.5))
+                px.append(0xDCE8DC if linha else c)
+        return px
+
+    # --- o lance: tudo é função do tempo, então o replay é só rodar de novo mais devagar
+
+    def novo_lance(self, t0):
+        self.n += 1
+        self.t0 = t0
+        self.marcou = False
+        self.Zh = 34 + random.choice((-1, 1)) * random.uniform(0.6, 2.0)   # onde o Gabriel cabeceia
+        self.Zt = 34 + random.choice((-1, 1)) * random.uniform(2.2, 3.0)   # canto em que a bola entra
+        self.Yt = random.uniform(0.5, 1.9)
+        self.Zg0 = self.Zh + random.choice((-1, 1)) * random.uniform(4, 7)
+        self.dv = 1 if self.Zt > 34 else -1  # pra onde o goleiro devia ter pulado (pula atrasado)
+        r = self.rival
+        ars = {"m": 0xFFFFFF, "c": ARS_VERMELHO, "w": 0xFFFFFF, "p": 0xFFFFFF, "b": 0x1A1A1A}
+        riv = {"m": r["camisa"], "c": r["camisa"], "w": r["calcao"], "p": r["meiao"], "b": 0x1A1A1A}
+        self.jog = []
+        for X, Z, dX, dZ in ((-10.0, 25.5, 4.0, 3.0), (-7.5, 42.0, 2.5, -2.0), (-14.0, 33.0, 5.0, 1.0),
+                             (-2.0, 35.5, 0.0, 0.0)):
+            cores = dict(ars, k=random.choice(CABELOS), s=random.choice(PELES))
+            self.jog.append(dict(cores=cores, X=X, Z=Z, dX=dX, dZ=dZ, olha=1, marca=None))
+        for a in list(self.jog):
+            cores = dict(riv, k=random.choice(CABELOS), s=random.choice(PELES))
+            self.jog.append(dict(cores=cores, X=a["X"] + 0.9, Z=a["Z"] + random.uniform(-0.8, 0.8), dX=a["dX"] * 0.6,
+                                 dZ=a["dZ"] * 0.6, olha=-1, marca=None))
+        cores = dict(riv, k=random.choice(CABELOS), s=random.choice(PELES))
+        self.jog.append(dict(cores=cores, X=-1.0, Z=31.5, dX=0, dZ=0, olha=-1, marca=None))
+        self.gabriel = dict(ars, k=0x1C140E, s=0xC68642)
+        self.cobrador = dict(ars, k=0x8A6A3A, s=0xF1C9A5)
+        self.marcador = dict(riv, k=random.choice(CABELOS), s=random.choice(PELES))
+        gk = r["goleiro"]
+        self.goleiro = {"m": gk, "c": gk, "w": 0x1A1A1A, "p": gk, "b": 0x1A1A1A, "k": random.choice(CABELOS),
+                        "s": random.choice(PELES)}
+
+    def estado(self, tau):
+        """Onde está todo mundo (e a bola) no instante tau do lance."""
+        L = []
+        mov = suave((tau - 2.3) / 1.8)
+        abraco = suave((tau - 5.0) / 2.2)  # o time do Arsenal corre pra abraçar o Gabriel
+        for k, j in enumerate(self.jog):
+            ginga = math.sin(tau * 3 + j["X"]) * 0.25 * (1 - mov)
+            X, Z = j["X"] + j["dX"] * mov + ginga, j["Z"] + j["dZ"] * mov
+            pose = "corre" if 0 < mov < 1 else "parado"
+            olha = j["olha"]
+            if j["olha"] > 0 and abraco > 0:
+                ax, az = -8.9 + (k % 2 * 2 - 1) * (1.2 + k * 0.4), 16.0 + 1.5 + k * 0.8
+                X, Z = X + (ax - X) * abraco, Z + (az - Z) * abraco
+                pose = "festa" if abraco >= 1 else "corre"
+                olha = -1
+            L.append((X, 0.0, Z, j["cores"], pose, olha))
+        # o cobrador
+        if tau < 1.4:
+            cx, cz, pose = 1.4, -0.9, "parado"
+        elif tau < 2.0:
+            f = (tau - 1.4) / 0.6
+            cx, cz, pose = 1.4 - 1.1 * f, -0.9 + 1.0 * f, "corre"
+        else:
+            cx, cz, pose = 0.3, 0.1, "chuta" if tau < 2.4 else "parado"
+        L.append((cx, 0.0, cz, self.cobrador, pose, -1))
+        # Gabriel: corrida, pulo e cabeçada
+        if tau < 2.6:
+            gx, gz, gy, pose = -12.0 + math.sin(tau * 2) * 0.3, self.Zg0, 0.0, "parado"
+        elif tau < 3.95:
+            f = suave((tau - 2.6) / 1.35)
+            gx, gz, gy, pose = -12.0 + 5.6 * f, self.Zg0 + (self.Zh - self.Zg0) * f, 0.0, "corre"
+        elif tau < 4.6:
+            f = (tau - 3.95) / 0.65
+            gx, gz, gy, pose = -6.4 + 0.5 * f, self.Zh, math.sin(f * math.pi) * 0.95, "pulo"
+        elif tau < 8.5:
+            f = suave((tau - 4.6) / 2.6)
+            gx, gz, gy, pose = -5.9 - 3 * f, self.Zh + (16 - self.Zh) * f, 0.0, "festa" if f >= 1 else "corre"
+        else:
+            gx, gz, gy, pose = -8.9, 16.0, 0.0, "festa"
+        L.append((gx, gy, gz, self.gabriel, pose, 1 if tau < 4.6 else -1))
+        # o marcador dele chega atrasado e pula baixo
+        if tau < 3.95:
+            mx, mz = gx + 1.0, gz + 0.9
+            my, mpose = 0.0, "corre" if tau > 2.7 else "parado"
+        elif tau < 4.7:
+            f = (tau - 4.05) / 0.65
+            mx, mz, my, mpose = -5.5, self.Zh + 0.9, max(0.0, math.sin(clamp(f) * math.pi) * 0.45), "pulo"
+        else:
+            mx, mz, my, mpose = -5.5, self.Zh + 0.9, 0.0, "parado"
+        L.append((mx, my, mz, self.marcador, mpose, -1))
+        # goleiro: sai atrasado pro canto
+        if tau < 4.3:
+            kx, kz, ky, kpose = -0.6, 34 + math.sin(tau * 2) * 0.4, 0.0, "parado"
+        else:
+            f = clamp((tau - 4.3) / 0.35)
+            kx, kz, ky, kpose = -0.6, 34 + self.dv * 2.0 * f, math.sin(f * math.pi) * 0.5, "deitado" if f >= 1 else "pulo"
+        L.append((kx, ky, kz, self.goleiro, kpose, -1))
+        # a bola
+        if tau < 2.0:
+            b = (0.2, 0.0, 0.3)
+        elif tau < 4.2:
+            f = (tau - 2.0) / 2.2
+            b = (0.2 + (-5.6 - 0.2) * f, 0.1 + 2.6 * f + 6.5 * math.sin(f * math.pi), 0.3 + (self.Zh - 0.3) * f)
+        elif tau < 4.5:
+            f = (tau - 4.2) / 0.3
+            b = (-5.6 + 5.9 * f, 2.7 + (self.Yt - 2.7) * f, self.Zh + (self.Zt - self.Zh) * f)
+        else:
+            f = clamp((tau - 4.5) / 0.35)
+            b = (0.3 + 1.4 * f, self.Yt * (1 - f), self.Zt)
+        return L, b
+
+    # --- desenho
+
+    def draw(self, t, dt, ch, co):
+        self.t = t
+        tau = t - self.t0
+        if tau >= self.DUR:
+            self.novo_lance(t)
+            tau = 0.0
+        replay = tau >= 8.6
+        tr = 2.4 + (tau - 8.6) * 0.38 if replay else tau
+        if not self.marcou and tau >= 4.55:
+            self.marcou = True
+            self.gols[0] += 1
+            for _ in range(120):
+                self.confete.append([random.uniform(0, self.w), random.uniform(-20, 0), random.uniform(-3, 3),
+                                     random.uniform(10, 22), random.choice((ARS_VERMELHO, 0xFFFFFF, ARS_OURO)),
+                                     random.uniform(0, 6.3), t])
+        w, h, ph = self.w, self.h, self.ph
+        px = self.px
+        self.mirar_camera(tr)
+        ini = max(0, min(len(self.fundo) - w * ph, (self.cam - self.y_min) * w))
+        px[:] = self.fundo[ini:ini + w * ph]
+        L, bola = self.estado(tr)
+        self.desenhar_gol(px, tr, bola)
+        bx, by = self.tela(bola[0], 0, bola[2])
+        for xx in range(int(bx) - 1, int(bx) + 2):
+            if 0 <= xx < w and 0 <= int(by) < ph:
+                px[int(by) * w + xx] = escala(px[int(by) * w + xx], 0.45)
+        itens = [(Z, "j", (X, Y, Z, cores, pose, olha)) for X, Y, Z, cores, pose, olha in L]
+        itens.append((bola[2] - 0.01, "b", bola))
+        for _, tipo, it in sorted(itens, key=lambda k: -k[0]):
+            if tipo == "j":
+                self.desenhar_jogador(px, *it, tr)
+            else:
+                x, y = self.tela(*it)
+                quadro = BOLINHA[int(tr * 10) % 2]
+                for (xx, yy), c in arte_pixels(quadro, int(x) - 2 * self.e, int(y) - 4 * self.e, self.e,
+                                               {"W": 0xFFFFFF, "K": 0x202020}).items():
+                    if 0 <= xx < w and 0 <= yy < ph:
+                        px[yy * w + xx] = c
+        self.desenhar_confete(px, dt)
+        if 4.6 <= tau < 7.6:
+            pisca = int((tau - 4.6) * 5) % 2
+            letreiro(px, w, ph, "GOOOOL!", w / 2, ph * 0.45, esc_letreiro("GOOOOL!", w * 0.6, 4),
+                     0xFFFFFF if pisca else ARS_VERMELHO, ARS_VERMELHO if pisca else 0xFFFFFF)
+        if replay and int(tau * 2) % 2:
+            letreiro(px, w, ph, "REPLAY", 4 + 18 * self.e, ph * 0.3, self.e, 0xFFE040, 0x202020)
+        px[:2 * w] = [0] * (2 * w)
+        px[(ph - 2) * w:] = [0] * (2 * w)
+        pixels_para_celulas(px, w, h, ch, co)
+        r = self.rival
+        x = chip(ch, co, w, h, 2, 0, " ARS ", 0xFFFFFF, ARS_VERMELHO)
+        x = chip(ch, co, w, h, x, 0, f" {self.gols[0]}-{self.gols[1]} ", 0xFFFFFF, 0x1C1C1C)
+        x = chip(ch, co, w, h, x, 0, f" {r['sigla']} ", r["chip"][0], r["chip"][1])
+        m = self.min0 + (self.n * self.DUR + min(tau, 8.6)) * 0.4
+        chip(ch, co, w, h, x + 1, 0, f" {int(m):02d}:{int(m % 1 * 60):02d} ", 0xD8D8D8, 0x2E2E2E)
+        if tau < 4.6 and not replay:
+            gx, gy, gz = next((X, Y, Z) for X, Y, Z, c, _, _ in L if c is self.gabriel)
+            sx, sy = self.tela(gx, gy, gz)
+            row = int(sy - 13 * self.e) // 2
+            nome = "GABRIEL ▼"
+            for k, s in enumerate(nome):
+                xx = int(sx) - 4 + k
+                if 0 <= xx < w and 0 <= row < h:
+                    escrever(ch, co, w, h, xx, row, NBSP if s == " " else s,
+                             fundo(0xFFE040 if s == "▼" else 0xFFFFFF, px[2 * row * w + xx]))
+        if replay:
+            txt, cor_ = "Olha o replay: subiu sozinho, testou firme. Indefensável!", 0xFFE040
+        elif tau < 1.2:
+            txt, cor_ = f"Escanteio para o Arsenal. Rice vai cobrar.", 0xE0E0E0
+        elif tau < 4.2:
+            txt, cor_ = "Rice levantou na área... olha o Gabriel!", 0xE0E0E0
+        elif tau < 5.6:
+            txt, cor_ = "GABRIEL MAGALHÃES! DE CABEÇAAA!", ARS_VERMELHO if int(t * 4) % 2 else 0xFFFFFF
+        elif tau < 7.0:
+            txt, cor_ = "GOOOOOOOOL DO ARSENAL!", ARS_VERMELHO if int(t * 4) % 2 else 0xFFFFFF
+        else:
+            txt, cor_ = self.EXTRAS[self.n % len(self.EXTRAS)], 0xFFFFFF
+        escrever(ch, co, w, h, 2, h - 1, "▸ " + txt, cor_)
+
+    def desenhar_jogador(self, px, X, Y, Z, cores, pose, olha, tau):
+        w, ph, e = self.w, self.ph, self.e
+        sx, sy = self.tela(X, 0, Z)
+        sy -= Y * self.Sy * self.D / (Z + self.D)
+        if pose == "deitado":
+            arte = DEITADO
+        elif pose == "festa":
+            arte = BRACOS_CIMA + PERNAS_LADO["parado" if int(tau * 6) % 2 else "corre2"]
+            sy -= int(abs(math.sin(tau * 9)) * 2 * e)
+        else:
+            pernas = pose if pose in PERNAS_LADO else ("corre1" if int(tau * 8 + X) % 2 else "corre2")
+            arte = CORPO_LADO + PERNAS_LADO[pernas]
+        largura = max(len(l) for l in arte)
+        if olha < 0:
+            arte = [l.ljust(largura, ".")[::-1] for l in arte]
+        x0, y0 = int(sx) - 3 * e, int(sy) - len(arte) * e
+        for (x, y), c in arte_pixels(arte, x0, y0, e, cores).items():
+            if 0 <= x < w and 0 <= y < ph:
+                px[y * w + x] = c
+
+    def desenhar_gol(self, px, tau, bola):
+        """Traves, travessão e rede (a rede estufa quando a bola entra)."""
+        w, ph = self.w, self.ph
+        estufa = 0.0
+        if 4.45 <= tau < 5.6:
+            estufa = 0.55 * (1 - (tau - 4.45) / 1.15)
+
+        def ponto(X, Y, Z, c):
+            x, y = self.tela(X, Y, Z)
+            x, y = int(x), int(y)
+            if 0 <= x < w and 0 <= y < ph:
+                px[y * w + x] = c
+
+        rede = 0xB8C4B8
+        z0, z1 = 34 - 3.66, 34 + 3.66
+        passo = 0.18
+        for i in range(int(2.0 / passo) + 1):          # teto e laterais
+            X = i * passo
+            for j in range(int(2.44 / passo) + 1):
+                Y = j * passo
+                for Z in (z0, z1):
+                    if (i + j) % 2 == 0:
+                        ponto(X, Y * (1 - X * 0.2), Z, rede)
+            for k in range(int(7.32 / passo) + 1):
+                if (i + k) % 2 == 0:
+                    ponto(X, 2.44 - X * 0.2, z0 + k * passo, rede)
+        for k in range(int(7.32 / passo) + 1):          # fundo da rede
+            Z = z0 + k * passo
+            for j in range(int(2.0 / passo) + 1):
+                Y = j * passo
+                if (j + k) % 2 == 0:
+                    d = math.hypot(Z - self.Zt, Y - self.Yt * 0.6)
+                    ponto(2.0 + estufa * max(0.0, 1 - d / 2.2), Y, Z, rede)
+        for Z in (z0, z1):                               # traves
+            for j in range(0, 25):
+                ponto(0, 2.44 * j / 24, Z, 0xFFFFFF)
+        for k in range(0, 41):                           # travessão
+            ponto(0, 2.44, z0 + 7.32 * k / 40, 0xFFFFFF)
+
+    def desenhar_confete(self, px, dt):
+        w, ph, t = self.w, self.ph, self.t
+        vivos = []
+        for c in self.confete:
+            c[0] += (c[2] + math.sin(t * 4 + c[5]) * 5) * dt
+            c[1] += c[3] * dt
+            if c[1] < ph and t - c[6] < 5:
+                vivos.append(c)
+                x, y = int(c[0]), int(c[1])
+                if 0 <= x < w and 0 <= y < ph:
+                    px[y * w + x] = c[4]
+        self.confete = vivos
+
+
 class Preto(Cena):
     """Tela preta: ponte entre cenas que usam perfis (tamanhos de fonte) diferentes."""
     combinavel = False
@@ -3564,7 +5692,8 @@ class Extras:
 
 
 CENAS = [Matrix, Plasma, Tunel, Estrelas, Fogo, Ondas, Vida, Rosca, Hex, Synthwave,
-         Pokemon, Clawd, ClawdSoneca, ClawdFesta, ClawdEspaco, Tetris, DVD, Labirinto]
+         Pokemon, Clawd, ClawdSoneca, ClawdFesta, ClawdEspaco, Tetris, DVD, Labirinto, Arsenal, Torcida, Canhao,
+         Escanteio]
 POR_CIMA = [Matrix, Matrix, Estrelas, Ondas]
 
 
@@ -3572,7 +5701,7 @@ def sortear_cena(anterior=None):
     nomes_ant = set()
     if anterior is not None:
         nomes_ant = {type(c).__name__ for c in (getattr(anterior, "baixo", anterior), getattr(anterior, "cima", anterior))}
-    base = [Matrix, DVD, Labirinto, Clawd, Pokemon, Hex, Estrelas] if OVOS else CENAS
+    base = [Matrix, DVD, Clawd, Pokemon, Hex, Estrelas] if OVOS else CENAS
     opcoes = [c for c in base if c.__name__ not in nomes_ant and (not hasattr(c, "disponivel") or c.disponivel())]
     opcoes = opcoes or [c for c in CENAS if not hasattr(c, "disponivel")]
     cls = random.choices(opcoes, weights=[c.peso for c in opcoes])[0]
@@ -3626,11 +5755,21 @@ def render(ch, co, w, h):
                 continue
             k = co[i]
             if k != ultima:
+                # manda só a parte que mudou (frente ou fundo): bem menos bytes nas cenas cheias de cor
+                mesma_frente = ultima >= 0 and (ultima & 0xFFFFFF) == (k & 0xFFFFFF)
                 if k & BG:
                     bg = (k >> 24) & 0xFFFFFF
-                    out.append("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm" % ((k >> 16) & 255, (k >> 8) & 255, k & 255,
-                                                                    bg >> 16, (bg >> 8) & 255, bg & 255))
+                    if com_fundo and ((ultima >> 24) & 0xFFFFFF) == bg:
+                        out.append("\x1b[38;2;%d;%d;%dm" % ((k >> 16) & 255, (k >> 8) & 255, k & 255))
+                    elif mesma_frente:
+                        out.append("\x1b[48;2;%d;%d;%dm" % (bg >> 16, (bg >> 8) & 255, bg & 255))
+                    else:
+                        out.append("\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm" % ((k >> 16) & 255, (k >> 8) & 255, k & 255,
+                                                                        bg >> 16, (bg >> 8) & 255, bg & 255))
                     com_fundo = True
+                elif mesma_frente:
+                    out.append("\x1b[49m")
+                    com_fundo = False
                 else:
                     out.append("\x1b[%s38;2;%d;%d;%dm" % ("49;" if com_fundo else "", k >> 16, (k >> 8) & 255, k & 255))
                     com_fundo = False

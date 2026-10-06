@@ -2,7 +2,7 @@
 
 Um protetor de tela de terminal para **Linux no Wayland** (KDE Plasma 6 ou Hyprland) feito em Python puro: quando
 o PC fica parado, um terminal em tela cheia (Konsole, Alacritty, kitty, ghostty, foot ou wezterm) abre e começa um
-rodízio de 18 cenas animadas em ASCII e meio-bloco (`▀▄`), que se dissolvem umas nas outras com um efeito de glitch.
+rodízio de 22 cenas animadas em ASCII e meio-bloco (`▀▄`), que se dissolvem umas nas outras com um efeito de glitch.
 Mexeu no mouse ou no teclado, ele some.
 
 Testado no Fedora + KDE + Konsole; feito pra funcionar também no **CachyOS** (KDE ou Hyprland) e no **Omarchy**
@@ -39,8 +39,35 @@ E, se você quiser (só no KDE), o mesmo rodízio vira um **vídeo de fundo na t
 | `Tetris` | Tetris jogando sozinho |
 | `DVD` | o logo do DVD quicando (vai bater no canto?) |
 | `Labirinto` | labirinto 3D em raycasting, estilo Wolfenstein |
+| `Arsenal` | Arsenal x Tottenham (ou City) visto de cima, com narração, VAR e bola parada. O Arsenal sempre ganha |
+| `Torcida` | a torcida do Arsenal no Emirates: ola, cachecóis, sinalizadores e mosaicos de cartões |
+| `Canhao` | o canhão do Arsenal contra o galo do Tottenham (e o dirigível do City, que sempre aparece) |
+| `Escanteio` | gol de cabeça do Gabriel Magalhães em escanteio do Rice, com câmera estilo Futebol Brasileiro 96 e replay |
 
 Algumas cenas ainda podem vir **combinadas** (uma por cima da outra) e com paletas de cores sorteadas.
+
+### Up the Arsenal
+
+Aqui é Gooner, então quatro cenas são do Arsenal, e City e Tottenham só entram pra apanhar:
+
+- **`Arsenal`**: a partida no Emirates, com placar e relógio de TV, letreiros de LED e narração em português.
+  Tem drible que deixa o zagueiro no chão, gol de escanteio de cabeça, chute na trave com rebote e, quando o rival
+  finalmente marca, o VAR traça as linhas e anula. De vez em quando quem entra em campo são os **Invencíveis**
+  de 2003/04 (Henry, Bergkamp, Vieira, Pires…). Se o relógio chegar aos 90, apita o fim de jogo com festa.
+- **`Torcida`**: a arquibancada inteira pulando, com ola, cachecóis pra cima, bandeiras, sinalizadores e
+  mosaicos de cartões (`COYG`, `1886`, `49 INVICTOS`, `NORTH LONDON IS RED`, o canhão). O Clawd está na primeira
+  fila, de cachecol.
+- **`Canhao`**: o canhão mira, acende o pavio e dispara bolas de futebol no galo azul-marinho, que insiste que
+  "esse ano vai". No meio passa um dirigível azul-celeste do City, e o canhão não perdoa.
+- **`Escanteio`**: a câmera de lado do SNES (Futebol Brasileiro 96 / ISS): Rice cobra, a câmera acompanha a bola,
+  o Gabriel Magalhães sobe mais que todo mundo e testa pro gol, a rede estufa, o time corre pro abraço e vem o
+  replay em câmera lenta. Sempre ele, sempre de cabeça.
+
+| | | |
+|---|---|---|
+| ![Arsenal x City](docs/arsenal.png) | ![Torcida do Arsenal](docs/torcida.png) | ![Canhão x galo](docs/canhao.png) |
+
+As outras cenas também deixam escapar umas provocações.
 
 ### Easter eggs
 
@@ -240,8 +267,9 @@ de instalação e tire os blocos `# >>> screensaver-ascii` do `hypridle.conf`/`h
 ## Aviso
 
 Projeto de fã, sem fins lucrativos. **Não é afiliado, patrocinado ou endossado** pela Nintendo, Game Freak,
-Creatures Inc. ou The Pokémon Company, nem pela Anthropic. Pokémon e seus personagens são marcas das respectivas
-donas; Claude, Claude Code e o Clawd são da Anthropic. O código é MIT (veja `LICENSE`); isso não cobre nenhum
+Creatures Inc. ou The Pokémon Company, nem pela Anthropic, nem pelo Arsenal, Tottenham Hotspur, Manchester City ou
+Premier League. Pokémon e seus personagens são marcas das respectivas donas; Claude, Claude Code e o Clawd são da
+Anthropic. Os nomes de clubes e jogadores aparecem só como homenagem (e provocação) de torcedor. O código é MIT (veja `LICENSE`); isso não cobre nenhum
 material de terceiros que o script baixa.
 
 ---
@@ -249,10 +277,12 @@ material de terceiros que o script baixa.
 ## English
 
 **screensaver-ascii** is a terminal screensaver for Wayland (KDE Plasma 6 or Hyprland), in pure Python. After 2.5
-minutes idle, `swayidle` (or `hypridle`) opens a fullscreen terminal that cycles through 18 animated ASCII/half-block scenes (Matrix,
+minutes idle, `swayidle` (or `hypridle`) opens a fullscreen terminal that cycles through 22 animated ASCII/half-block scenes (Matrix,
 plasma, tunnel, starfield, fire, ripples, Game of Life, spinning donut, hacker hex, synthwave, a FireRed-style
-Pokémon battle, four Claude Code mascot scenes, self-playing Tetris, bouncing DVD logo, raycaster maze) with glitchy
-dissolve transitions. Any input closes it. Optionally the same show is rendered into a video and used as the
+Pokémon battle, four Claude Code mascot scenes, self-playing Tetris, bouncing DVD logo, raycaster maze, and four
+Arsenal scenes: a narrated match against Tottenham or City that Arsenal always wins, the home crowd with card
+mosaics and flares, the Arsenal cannon shooting at the Spurs cockerel, and a
+SNES-style corner-kick header by Gabriel Magalhães with replay) with glitchy dissolve transitions. Any input closes it. Optionally the same show is rendered into a video and used as the
 lock-screen background via the Smart Video Wallpaper Reborn plugin. There are rare, silly easter eggs
 (`SS_OVOS=1` to see them).
 
@@ -274,5 +304,6 @@ comment out the built-in `omarchy-launch-screensaver` listener so both don't sta
 over D-Bus, kitty uses `kitty @ set-font-size`, Alacritty ≥ 0.13 uses `alacritty msg config font.size=N`. ghostty,
 foot and wezterm can't change the font live, so the scene only plays if the terminal is already big enough.
 
-Fan project, not affiliated with Nintendo, Game Freak, The Pokémon Company or Anthropic. No sprites are
+Fan project, not affiliated with Nintendo, Game Freak, The Pokémon Company, Anthropic, Arsenal FC, Tottenham
+Hotspur, Manchester City or the Premier League. No sprites are
 distributed here. MIT licensed.
