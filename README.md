@@ -232,6 +232,10 @@ Exemplo: `SS_DURACAO=6 screensaver-ascii --cena Clawd`.
 - O **bloqueio de tela continua sendo do KDE** (ou do `hyprlock` no Hyprland), no tempo que estiver em *Configurações › Tela de bloqueio*
   (deixe maior que 2min30, senão bloqueia antes do screensaver aparecer). Quando a tela bloqueia, o screensaver
   percebe (via `org.freedesktop.ScreenSaver` no KDE, ou vendo um processo `hyprlock`/`swaylock`) e sai sozinho.
+- **Inibições valem**: se algum app pediu pra tela não apagar (o "sempre ativo" do Orca, um vídeo tocando, o
+  "bloquear suspensão e bloqueio de tela" da bandeja do KDE), o screensaver não abre e o KDE também não bloqueia
+  a tela sozinho: no KDE o `screensaver-iniciar` consulta o PowerDevil e, enquanto a inibição durar, avisa o KDE a
+  cada minuto que tem gente usando (`SimulateUserActivity`). No Hyprland, o hypridle já respeita inibições sozinho.
 - Os tempos de desligar a tela/suspender ficam em *Configurações › Energia*; ajuste do seu jeito.
 - Com `--bloqueio` (só KDE), a tela de bloqueio usa o plugin Smart Video Wallpaper Reborn tocando
   `~/.local/share/screensaver-ascii/bloqueio.mp4` em loop. O instalador grava isso no `~/.config/kscreenlockerrc`

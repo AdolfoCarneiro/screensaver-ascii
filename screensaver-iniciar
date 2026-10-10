@@ -11,6 +11,24 @@ PIDF="${XDG_RUNTIME_DIR:-/tmp}/screensaver.pid"
 # tela já bloqueada (hyprlock/swaylock)? não abre nada por cima
 pidof hyprlock swaylock >/dev/null 2>&1 && exit 0
 
+# KDE: alguém pediu pra tela não apagar ("sempre ativo" do Orca, vídeo tocando, "bloquear suspensão e bloqueio de
+# tela" da bandeja)? O swayidle não sabe dessas inibições (elas ficam no PowerDevil), então conferimos aqui.
+# Enquanto durar, não abre o screensaver e cutuca o KDE a cada minuto pra ele também não bloquear a tela sozinho.
+# Se a inibição acabar com você ainda longe, segue e abre o screensaver. O screensaver-parar mata o loop.
+inibido() {
+  gdbus call --session --dest org.kde.Solid.PowerManagement.PolicyAgent \
+    --object-path /org/kde/Solid/PowerManagement/PolicyAgent \
+    --method org.kde.Solid.PowerManagement.PolicyAgent.HasInhibition 4 2>/dev/null | grep -q true
+}
+if command -v gdbus >/dev/null 2>&1 && inibido; then
+  echo $$ > "$PIDF"
+  while inibido; do
+    gdbus call --session --dest org.freedesktop.ScreenSaver --object-path /ScreenSaver \
+      --method org.freedesktop.ScreenSaver.SimulateUserActivity >/dev/null 2>&1
+    sleep 60
+  done
+fi
+
 PROG="$HOME/.local/bin/screensaver-ascii"
 CLASSE="screensaver-ascii"
 FONTE="${SCREENSAVER_FONTE:-14}"
